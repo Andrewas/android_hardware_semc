@@ -1,17 +1,17 @@
-diff --git a/audio/AudioPolicyCompatClient.cpp b/audio/AudioPolicyCompatClient.c
+diff --git a/hardware/libhardware_legacy/audio/AudioPolicyCompatClient.cpp b/hardware/libhardware_legacy/audio/AudioPolicyCompatClient.cpp
 index 162968c..f6e67b6 100644
---- a/audio/AudioPolicyCompatClient.cpp
-+++ b/audio/AudioPolicyCompatClient.cpp
-@@ -74,6 +74,21 @@ audio_io_handle_t AudioPolicyCompatClient::openInput(audio_mo
+--- a/hardware/libhardware_legacy/audio/AudioPolicyCompatClient.cpp
++++ b/hardware/libhardware_legacy/audio/AudioPolicyCompatClient.cpp
+@@ -74,6 +74,21 @@ audio_io_handle_t AudioPolicyCompatClient::openInput(audio_module_handle_t modul
                                                       audio_devices_t *pDevices,
                                                       uint32_t *pSamplingRate,
                                                       audio_format_t *pFormat,
 +#ifdef STE_AUDIO
-+                                                     audio_channel_mask_t *pCha
-+                                                     audio_input_clients *pInpu
++                                                     audio_channel_mask_t *pChannelMask,
++                                                     audio_input_clients *pInputClientId)
 +{
 +    return mServiceOps->open_input_on_module(mService, module, pDevices,
-+                                             pSamplingRate, pFormat, pChannelMa
++                                             pSamplingRate, pFormat, pChannelMask, pInputClientId);
 +}
 +
 +status_t AudioPolicyCompatClient::closeInput(audio_io_handle_t input,
@@ -21,42 +21,42 @@ index 162968c..f6e67b6 100644
 +}
 +
 +#else
-                                                      audio_channel_mask_t *pCha
+                                                      audio_channel_mask_t *pChannelMask)
  {
      return mServiceOps->open_input_on_module(mService, module, pDevices,
-@@ -84,6 +99,7 @@ status_t AudioPolicyCompatClient::closeInput(audio_io_handle_t
+@@ -84,6 +99,7 @@ status_t AudioPolicyCompatClient::closeInput(audio_io_handle_t input)
  {
      return mServiceOps->close_input(mService, input);
  }
 +#endif
  
- status_t AudioPolicyCompatClient::setStreamOutput(AudioSystem::stream_type stre
+ status_t AudioPolicyCompatClient::setStreamOutput(AudioSystem::stream_type stream,
                                               audio_io_handle_t output)
-diff --git a/audio/AudioPolicyCompatClient.h b/audio/AudioPolicyCompatClient.h
+diff --git a/hardware/libhardware_legacy/audio/AudioPolicyCompatClient.h b/hardware/libhardware_legacy/audio/AudioPolicyCompatClient.h
 index 494c8af..afc20ee 100644
---- a/audio/AudioPolicyCompatClient.h
-+++ b/audio/AudioPolicyCompatClient.h
+--- a/hardware/libhardware_legacy/audio/AudioPolicyCompatClient.h
++++ b/hardware/libhardware_legacy/audio/AudioPolicyCompatClient.h
 @@ -54,8 +54,15 @@ public:
                                          audio_devices_t *pDevices,
                                          uint32_t *pSamplingRate,
                                          audio_format_t *pFormat,
 +#ifdef STE_AUDIO
 +                                        audio_channel_mask_t *pChannelMask,
-+                                        audio_input_clients *pInputClientId = N
++                                        audio_input_clients *pInputClientId = NULL);
 +    virtual status_t closeInput(audio_io_handle_t input,
 +                                audio_input_clients *inputClientId = NULL);
 +#else
                                          audio_channel_mask_t *pChannelMask);
      virtual status_t closeInput(audio_io_handle_t input);
 +#endif
-     virtual status_t setStreamOutput(AudioSystem::stream_type stream, audio_io_
+     virtual status_t setStreamOutput(AudioSystem::stream_type stream, audio_io_handle_t output);
      virtual status_t moveEffects(int session,
                                   audio_io_handle_t srcOutput,
-diff --git a/audio/AudioPolicyManagerBase.cpp b/audio/AudioPolicyManagerBase.cpp
+diff --git a/hardware/libhardware_legacy/audio/AudioPolicyManagerBase.cpp b/hardware/libhardware_legacy/audio/AudioPolicyManagerBase.cpp
 index fdf0ca8..1d4b019 100644
---- a/audio/AudioPolicyManagerBase.cpp
-+++ b/audio/AudioPolicyManagerBase.cpp
-@@ -912,7 +912,12 @@ audio_io_handle_t AudioPolicyManagerBase::getInput(int inpu
+--- a/hardware/libhardware_legacy/audio/AudioPolicyManagerBase.cpp
++++ b/hardware/libhardware_legacy/audio/AudioPolicyManagerBase.cpp
+@@ -912,7 +912,12 @@ audio_io_handle_t AudioPolicyManagerBase::getInput(int inputSource,
                                      uint32_t samplingRate,
                                      uint32_t format,
                                      uint32_t channelMask,
@@ -69,7 +69,7 @@ index fdf0ca8..1d4b019 100644
  {
      audio_io_handle_t input = 0;
      audio_devices_t device = getDeviceForInputSource(inputSource);
-@@ -968,7 +973,12 @@ audio_io_handle_t AudioPolicyManagerBase::getInput(int inpu
+@@ -968,7 +973,12 @@ audio_io_handle_t AudioPolicyManagerBase::getInput(int inputSource,
                                      &inputDesc->mDevice,
                                      &inputDesc->mSamplingRate,
                                      &inputDesc->mFormat,
@@ -82,11 +82,11 @@ index fdf0ca8..1d4b019 100644
  
      // only accept input with the exact requested set of parameters
      if (input == 0 ||
-diff --git a/audio/audio_policy_hal.cpp b/audio/audio_policy_hal.cpp
+diff --git a/hardware/libhardware_legacy/audio/audio_policy_hal.cpp b/hardware/libhardware_legacy/audio/audio_policy_hal.cpp
 index 545d177..bbda520 100644
---- a/audio/audio_policy_hal.cpp
-+++ b/audio/audio_policy_hal.cpp
-@@ -177,11 +177,20 @@ static audio_io_handle_t ap_get_input(struct audio_policy 
+--- a/hardware/libhardware_legacy/audio/audio_policy_hal.cpp
++++ b/hardware/libhardware_legacy/audio/audio_policy_hal.cpp
+@@ -177,11 +177,20 @@ static audio_io_handle_t ap_get_input(struct audio_policy *pol, audio_source_t i
                                        uint32_t sampling_rate,
                                        audio_format_t format,
                                        audio_channel_mask_t channelMask,
@@ -98,28 +98,28 @@ index 545d177..bbda520 100644
 +#endif
  {
      struct legacy_audio_policy *lap = to_lap(pol);
-     return lap->apm->getInput((int) inputSource, sampling_rate, (int) format, c
+     return lap->apm->getInput((int) inputSource, sampling_rate, (int) format, channelMask,
 +#ifdef STE_AUDIO
-+                              (AudioSystem::audio_in_acoustics)acoustics, input
++                              (AudioSystem::audio_in_acoustics)acoustics, inputClientId);
 +#else
                                (AudioSystem::audio_in_acoustics)acoustics);
 +#endif
  }
  
  static int ap_start_input(struct audio_policy *pol, audio_io_handle_t input)
-diff --git a/include/hardware_legacy/AudioPolicyInterface.h b/include/hardware_l
+diff --git a/hardware/libhardware_legacy/include/hardware_legacy/AudioPolicyInterface.h b/hardware/libhardware_legacy/include/hardware_legacy/AudioPolicyInterface.h
 index 7847bdd..b82de09 100644
---- a/include/hardware_legacy/AudioPolicyInterface.h
-+++ b/include/hardware_legacy/AudioPolicyInterface.h
+--- a/hardware/libhardware_legacy/include/hardware_legacy/AudioPolicyInterface.h
++++ b/hardware/libhardware_legacy/include/hardware_legacy/AudioPolicyInterface.h
 @@ -112,7 +112,12 @@ public:
                                      uint32_t samplingRate = 0,
-                                     uint32_t Format = AudioSystem::FORMAT_DEFAU
+                                     uint32_t Format = AudioSystem::FORMAT_DEFAULT,
                                      uint32_t channels = 0,
 +#ifdef STE_AUDIO
-+                                    AudioSystem::audio_in_acoustics acoustics =
-+                                    audio_input_clients *inputClientId = NULL) 
++                                    AudioSystem::audio_in_acoustics acoustics = (AudioSystem::audio_in_acoustics)0,
++                                    audio_input_clients *inputClientId = NULL) = 0;
 +#else
-                                     AudioSystem::audio_in_acoustics acoustics =
+                                     AudioSystem::audio_in_acoustics acoustics = (AudioSystem::audio_in_acoustics)0) = 0;
 +#endif
      // indicates to the audio policy manager that the input starts being used.
      virtual status_t startInput(audio_io_handle_t input) = 0;
@@ -130,38 +130,38 @@ index 7847bdd..b82de09 100644
                                          audio_format_t *pFormat,
 +#ifdef STE_AUDIO
 +                                        audio_channel_mask_t *pChannelMask,
-+                                        audio_input_clients *pInputClientId = N
++                                        audio_input_clients *pInputClientId = NULL) = 0;
 +    // closes an audio input
-+    virtual status_t closeInput(audio_io_handle_t input, audio_input_clients *p
++    virtual status_t closeInput(audio_io_handle_t input, audio_input_clients *pInputClientId = NULL) = 0;
 +#else
-                                         audio_channel_mask_t *pChannelMask) = 0
+                                         audio_channel_mask_t *pChannelMask) = 0;
      // closes an audio input
      virtual status_t closeInput(audio_io_handle_t input) = 0;
 +#endif
      //
      // misc control functions
      //
-diff --git a/include/hardware_legacy/AudioPolicyManagerBase.h b/include/hardware
+diff --git a/hardware/libhardware_legacy/include/hardware_legacy/AudioPolicyManagerBase.h b/hardware/libhardware_legacy/include/hardware_legacy/AudioPolicyManagerBase.h
 index 5ba09f1..d94e000 100644
---- a/include/hardware_legacy/AudioPolicyManagerBase.h
-+++ b/include/hardware_legacy/AudioPolicyManagerBase.h
+--- a/hardware/libhardware_legacy/include/hardware_legacy/AudioPolicyManagerBase.h
++++ b/hardware/libhardware_legacy/include/hardware_legacy/AudioPolicyManagerBase.h
 @@ -106,7 +106,12 @@ public:
                                              uint32_t samplingRate,
                                              uint32_t format,
                                              uint32_t channels,
 +#ifdef STE_AUDIO
-+                                            AudioSystem::audio_in_acoustics aco
-+                                            audio_input_clients *inputClientId 
++                                            AudioSystem::audio_in_acoustics acoustics,
++                                            audio_input_clients *inputClientId = NULL);
 +#else
-                                             AudioSystem::audio_in_acoustics aco
+                                             AudioSystem::audio_in_acoustics acoustics);
 +#endif
  
-         // indicates to the audio policy manager that the input starts being us
+         // indicates to the audio policy manager that the input starts being used.
          virtual status_t startInput(audio_io_handle_t input);
-diff --git a/include/hardware_legacy/AudioSystemLegacy.h b/include/hardware_lega
+diff --git a/hardware/libhardware_legacy/include/hardware_legacy/AudioSystemLegacy.h b/hardware/libhardware_legacy/include/hardware_legacy/AudioSystemLegacy.h
 index b0ca0b3..a3f7746 100644
---- a/include/hardware_legacy/AudioSystemLegacy.h
-+++ b/include/hardware_legacy/AudioSystemLegacy.h
+--- a/hardware/libhardware_legacy/include/hardware_legacy/AudioSystemLegacy.h
++++ b/hardware/libhardware_legacy/include/hardware_legacy/AudioSystemLegacy.h
 @@ -65,7 +65,7 @@ enum audio_source {
      AUDIO_SOURCE_CAMCORDER = 5,
      AUDIO_SOURCE_VOICE_RECOGNITION = 6,
@@ -172,13 +172,13 @@ index b0ca0b3..a3f7746 100644
      AUDIO_SOURCE_FM_RX = 9,
      AUDIO_SOURCE_FM_RX_A2DP = 10,
 @@ -92,8 +92,9 @@ public:
-         ENFORCED_AUDIBLE = 7, // Sounds that cannot be muted by user and must b
+         ENFORCED_AUDIBLE = 7, // Sounds that cannot be muted by user and must be routed to speaker
          DTMF             = 8,
          TTS              = 9,
 -#ifdef QCOM_HARDWARE
 +#if defined(QCOM_HARDWARE) || defined(STE_FM)
          INCALL_MUSIC     = 10,
-+       FM               = 11,
++	FM               = 11,
  #endif
          NUM_STREAM_TYPES
      };
@@ -192,7 +192,7 @@ index b0ca0b3..a3f7746 100644
          DEVICE_OUT_USB_DEVICE = 0x4000,
          DEVICE_OUT_FM = 0x8000,
 @@ -274,7 +275,7 @@ public:
-                 DEVICE_OUT_BLUETOOTH_SCO_CARKIT | DEVICE_OUT_BLUETOOTH_A2DP | D
+                 DEVICE_OUT_BLUETOOTH_SCO_CARKIT | DEVICE_OUT_BLUETOOTH_A2DP | DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES |
                  DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER | DEVICE_OUT_AUX_DIGITAL |
                  DEVICE_OUT_ANLG_DOCK_HEADSET | DEVICE_OUT_DGTL_DOCK_HEADSET |
 -#ifdef QCOM_HARDWARE
@@ -202,11 +202,11 @@ index b0ca0b3..a3f7746 100644
                  DEVICE_OUT_FM | DEVICE_OUT_FM_TX |
 @@ -284,12 +285,12 @@ public:
  #endif
-         DEVICE_OUT_ALL_A2DP = (DEVICE_OUT_BLUETOOTH_A2DP | DEVICE_OUT_BLUETOOTH
+         DEVICE_OUT_ALL_A2DP = (DEVICE_OUT_BLUETOOTH_A2DP | DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES |
                  DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER),
 -#ifdef QCOM_HARDWARE
 +#if defined(QCOM_HARDWARE) || defined(STE_FM)
-         DEVICE_OUT_ALL_USB = (DEVICE_OUT_USB_ACCESSORY | DEVICE_OUT_USB_DEVICE)
+         DEVICE_OUT_ALL_USB = (DEVICE_OUT_USB_ACCESSORY | DEVICE_OUT_USB_DEVICE),
  #endif
  
          // input devices
@@ -220,7 +220,7 @@ index b0ca0b3..a3f7746 100644
          DEVICE_IN_BACK_MIC = 0x8000000,
          DEVICE_IN_ANC_HEADSET = 0x10000000,
 +#ifdef STE_FM
-+       DEVICE_IN_FM_RX = 0x1000000,
++	DEVICE_IN_FM_RX = 0x1000000,
 +#else
          DEVICE_IN_FM_RX = 0x20000000,
 +#endif
@@ -229,11 +229,11 @@ index b0ca0b3..a3f7746 100644
          DEVICE_IN_ANLG_DOCK_HEADSET = 0x80000000,
 @@ -318,7 +323,7 @@ public:
  
-         DEVICE_IN_ALL = (DEVICE_IN_COMMUNICATION | DEVICE_IN_AMBIENT | DEVICE_I
-                 DEVICE_IN_BLUETOOTH_SCO_HEADSET | DEVICE_IN_WIRED_HEADSET | DEV
+         DEVICE_IN_ALL = (DEVICE_IN_COMMUNICATION | DEVICE_IN_AMBIENT | DEVICE_IN_BUILTIN_MIC |
+                 DEVICE_IN_BLUETOOTH_SCO_HEADSET | DEVICE_IN_WIRED_HEADSET | DEVICE_IN_AUX_DIGITAL |
 -#ifdef QCOM_HARDWARE
 +#if defined(QCOM_HARDWARE) || defined(STE_FM)
-                 DEVICE_IN_VOICE_CALL | DEVICE_IN_BACK_MIC | DEVICE_IN_ANC_HEADS
+                 DEVICE_IN_VOICE_CALL | DEVICE_IN_BACK_MIC | DEVICE_IN_ANC_HEADSET |
                  DEVICE_IN_FM_RX | DEVICE_IN_FM_RX_A2DP | DEVICE_IN_DEFAULT |
                  DEVICE_IN_ANLG_DOCK_HEADSET | DEVICE_IN_PROXY)
 @@ -361,6 +366,20 @@ public:
@@ -241,7 +241,7 @@ index b0ca0b3..a3f7746 100644
      };
  
 +#ifdef STE_AUDIO
-+// AUDIO_INPUT_CLIENT_ID_BASE provide a means to refer to client Id´s not expli
++// AUDIO_INPUT_CLIENT_ID_BASE provide a means to refer to client Id´s not explicitly defined in the enum audio_input_clients
 +#define AUDIO_INPUT_CLIENT_ID_BASE AUDIO_INPUT_CLIENT_ID1
 +
 +    enum audio_input_clients {
@@ -249,8 +249,8 @@ index b0ca0b3..a3f7746 100644
 +        AUDIO_INPUT_CLIENT_ID2 = 0x2,
 +        AUDIO_INPUT_CLIENT_ID3 = 0x3,
 +        AUDIO_INPUT_CLIENT_ID4 = 0x4,
-+        AUDIO_INPUT_CLIENT_PLAYBACK = 0x80000000, // request client of playback
-+        AUDIO_INPUT_CLIENT_RECORD = 0x80000001   // request client of recording
++        AUDIO_INPUT_CLIENT_PLAYBACK = 0x80000000, // request client of playback type
++        AUDIO_INPUT_CLIENT_RECORD = 0x80000001   // request client of recording type
 +    };
 +#endif
 +
