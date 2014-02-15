@@ -1908,10 +1908,11 @@ index 8ebfa00..2a4aaaf 100644
              // be dropped and therefore not read by the application.
              sp<SyncEvent>                       mSyncStartEvent;
 diff --git a/frameworks/av/services/camera/libcameraservice/device1/CameraHardwareInterface.h b/frameworks/av/services/camera/libcameraservice/device1/CameraHardwareInterface.h
-index 9bc9985..427b27b 100644
+index 9bc9985..679ae4c 100644
 --- a/frameworks/av/services/camera/libcameraservice/device1/CameraHardwareInterface.h
 +++ b/frameworks/av/services/camera/libcameraservice/device1/CameraHardwareInterface.h
 @@ -660,8 +660,11 @@ private:
+     }
  
      static int __set_usage(struct preview_stream_ops* w, int usage)
 -    {
