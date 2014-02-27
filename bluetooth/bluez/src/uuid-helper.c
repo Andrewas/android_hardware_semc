@@ -26,29 +26,40 @@
 #endif
 
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
 #include <errno.h>
+#include <arpa/inet.h>
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/sdp.h>
 #include <bluetooth/sdp_lib.h>
 
-#include <glib.h>
-
-#include "glib-helper.h"
+#include "uuid-helper.h"
 
 char *bt_modalias(uint16_t source, uint16_t vendor,
 					uint16_t product, uint16_t version)
 {
+	char *str;
+	int err;
+
 	switch (source) {
 	case 0x0001:
-		return g_strdup_printf("%s:v%04Xp%04Xd%04X",
+		err = asprintf(&str, "%s:v%04Xp%04Xd%04X",
 					"bluetooth", vendor, product, version);
+		break;
 	case 0x0002:
-		return g_strdup_printf("%s:v%04Xp%04Xd%04X",
+		err = asprintf(&str, "%s:v%04Xp%04Xd%04X",
 					"usb", vendor, product, version);
+		break;
+	default:
+		return NULL;
 	}
 
-	return NULL;
+	if (err < 0)
+		return NULL;
+
+	return str;
 }
 
 char *bt_uuid2string(uuid_t *uuid)
@@ -61,6 +72,7 @@ char *bt_uuid2string(uuid_t *uuid)
 	unsigned short data3;
 	unsigned int data4;
 	unsigned short data5;
+	int err;
 
 	if (!uuid)
 		return NULL;
@@ -87,14 +99,12 @@ char *bt_uuid2string(uuid_t *uuid)
 	memcpy(&data4, &uuid128.value.uuid128.data[10], 4);
 	memcpy(&data5, &uuid128.value.uuid128.data[14], 2);
 
-	str = g_try_malloc0(MAX_LEN_UUID_STR);
-	if (!str)
+	err = asprintf(&str, "%.8x-%.4x-%.4x-%.4x-%.8x%.4x",
+			ntohl(data0), ntohs(data1),
+			ntohs(data2), ntohs(data3),
+			ntohl(data4), ntohs(data5));
+	if (err < 0)
 		return NULL;
-
-	sprintf(str, "%.8x-%.4x-%.4x-%.4x-%.8x%.4x",
-			g_ntohl(data0), g_ntohs(data1),
-			g_ntohs(data2), g_ntohs(data3),
-			g_ntohl(data4), g_ntohs(data5));
 
 	return str;
 }
@@ -141,7 +151,7 @@ static uint16_t name2class(const char *pattern)
 	return 0;
 }
 
-static inline gboolean is_uuid128(const char *string)
+static inline bool is_uuid128(const char *string)
 {
 	return (strlen(string) == 36 &&
 			string[8] == '-' &&
@@ -176,7 +186,7 @@ char *bt_name2string(const char *pattern)
 
 	/* UUID 128 string format */
 	if (is_uuid128(pattern))
-		return g_strdup(pattern);
+		return strdup(pattern);
 
 	/* Friendly service name format */
 	uuid16 = name2class(pattern);
@@ -208,12 +218,12 @@ int bt_string2uuid(uuid_t *uuid, const char *string)
 				&data0, &data1, &data2, &data3, &data4, &data5) == 6) {
 		uint8_t val[16];
 
-		data0 = g_htonl(data0);
-		data1 = g_htons(data1);
-		data2 = g_htons(data2);
-		data3 = g_htons(data3);
-		data4 = g_htonl(data4);
-		data5 = g_htons(data5);
+		data0 = htonl(data0);
+		data1 = htons(data1);
+		data2 = htons(data2);
+		data3 = htons(data3);
+		data4 = htonl(data4);
+		data5 = htons(data5);
 
 		memcpy(&val[0], &data0, 4);
 		memcpy(&val[4], &data1, 2);

@@ -27,19 +27,20 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <sdpd.h>
 #include <unistd.h>
 
 #include <glib.h>
 
+#include <bluetooth/bluetooth.h>
 #include <bluetooth/l2cap.h>
 #include <gdbus/gdbus.h>
-#include <dbus-common.h>
-#include <log.h>
-#include <error.h>
-#include <adapter.h>
-#include <device.h>
-#include <btio/btio.h>
+#include "src/dbus-common.h"
+#include "src/log.h"
+#include "src/error.h"
+#include "src/adapter.h"
+#include "src/device.h"
+#include "src/sdpd.h"
+#include "btio/btio.h"
 
 #include "mcap_lib.h"
 #include "hdp_types.h"
@@ -2144,7 +2145,8 @@ static struct hdp_device *create_health_device(struct btd_device *device)
 	if (!g_dbus_register_interface(btd_get_dbus_connection(),
 					path, HEALTH_DEVICE,
 					health_device_methods,
-					health_device_signals, NULL,
+					health_device_signals,
+					health_device_properties,
 					dev, health_device_destroy)) {
 		error("D-Bus failed to register %s interface", HEALTH_DEVICE);
 		goto fail;

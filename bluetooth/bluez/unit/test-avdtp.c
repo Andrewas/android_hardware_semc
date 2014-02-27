@@ -71,7 +71,7 @@ struct test_data {
 #define define_test(name, function, args...) \
 	do {								\
 		const struct test_pdu pdus[] = {			\
-			args, { }, { }					\
+			args, { }					\
 		};							\
 		static struct test_data data;				\
 		data.test_name = g_strdup(name);			\
@@ -215,7 +215,6 @@ static gboolean test_handler(GIOChannel *channel, GIOCondition cond,
 
 	return TRUE;
 }
-
 
 static struct context *context_new(uint16_t version, uint16_t imtu,
 					uint16_t omtu, gconstpointer data)

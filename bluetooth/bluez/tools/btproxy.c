@@ -418,8 +418,11 @@ static void server_callback(int fd, uint32_t events, void *user_data)
 
 	printf("New client connected\n");
 
-	if (!setup_proxy(host_fd, true, dev_fd, false))
+	if (!setup_proxy(host_fd, true, dev_fd, false)) {
+		close(dev_fd);
+		close(host_fd);
 		return;
+	}
 
 	client_active = true;
 }
@@ -677,8 +680,11 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		}
 
-		if (!setup_proxy(host_fd, false, dev_fd, true))
+		if (!setup_proxy(host_fd, false, dev_fd, true)) {
+			close(dev_fd);
+			close(host_fd);
 			return EXIT_FAILURE;
+		}
 	} else {
 		int server_fd;
 

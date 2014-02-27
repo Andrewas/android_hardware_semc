@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2012  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2012-2014  Intel Corporation. All rights reserved.
  *
  *
  *  This library is free software; you can redistribute it and/or
@@ -21,6 +21,7 @@
  *
  */
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <alloca.h>
 #include <byteswap.h>
@@ -32,6 +33,12 @@
 #define cpu_to_le16(val) (val)
 #define cpu_to_le32(val) (val)
 #define cpu_to_le64(val) (val)
+#define be16_to_cpu(val) bswap_16(val)
+#define be32_to_cpu(val) bswap_32(val)
+#define be64_to_cpu(val) bswap_64(val)
+#define cpu_to_be16(val) bswap_16(val)
+#define cpu_to_be32(val) bswap_32(val)
+#define cpu_to_be64(val) bswap_64(val)
 #elif __BYTE_ORDER == __BIG_ENDIAN
 #define le16_to_cpu(val) bswap_16(val)
 #define le32_to_cpu(val) bswap_32(val)
@@ -39,9 +46,31 @@
 #define cpu_to_le16(val) bswap_16(val)
 #define cpu_to_le32(val) bswap_32(val)
 #define cpu_to_le64(val) bswap_64(val)
+#define be16_to_cpu(val) (val)
+#define be32_to_cpu(val) (val)
+#define be64_to_cpu(val) (val)
+#define cpu_to_be16(val) (val)
+#define cpu_to_be32(val) (val)
+#define cpu_to_be64(val) (val)
 #else
 #error "Unknown byte order"
 #endif
+
+#define get_unaligned(ptr)			\
+({						\
+	struct __attribute__((packed)) {	\
+		typeof(*(ptr)) __v;		\
+	} *__p = (typeof(__p)) (ptr);		\
+	__p->__v;				\
+})
+
+#define put_unaligned(val, ptr)			\
+do {						\
+	struct __attribute__((packed)) {	\
+		typeof(*(ptr)) __v;		\
+	} *__p = (typeof(__p)) (ptr);		\
+	__p->__v = (val);			\
+} while (0)
 
 #define PTR_TO_UINT(p) ((unsigned int) ((uintptr_t) (p)))
 #define UINT_TO_PTR(u) ((void *) ((uintptr_t) (u)))

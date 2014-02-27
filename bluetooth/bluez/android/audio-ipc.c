@@ -2,21 +2,21 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2014  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2013-2014  Intel Corporation. All rights reserved.
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
@@ -34,8 +34,8 @@
 #include <unistd.h>
 #include <glib.h>
 
+#include "src/log.h"
 #include "ipc.h"
-#include "log.h"
 #include "audio-msg.h"
 #include "audio-ipc.h"
 
@@ -46,6 +46,7 @@ static struct service_handler service;
 static gboolean audio_watch_cb(GIOChannel *io, GIOCondition cond,
 							gpointer user_data)
 {
+	GDestroyNotify destroy = user_data;
 	char buf[BLUEZ_AUDIO_MTU];
 	ssize_t ret;
 	int fd, err;
@@ -74,33 +75,39 @@ static gboolean audio_watch_cb(GIOChannel *io, GIOCondition cond,
 
 fail:
 	audio_ipc_cleanup();
+	if (destroy)
+		destroy(NULL);
 	return FALSE;
 }
 
 static gboolean audio_connect_cb(GIOChannel *io, GIOCondition cond,
 							gpointer user_data)
 {
+	GDestroyNotify destroy = user_data;
+
 	DBG("");
 
 	if (cond & (G_IO_NVAL | G_IO_ERR | G_IO_HUP)) {
 		error("Audio IPC: socket connect failed");
 		audio_ipc_cleanup();
+		if (destroy)
+			destroy(NULL);
 		return FALSE;
 	}
 
 	cond = G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL;
 
-	g_io_add_watch(audio_io, cond, audio_watch_cb, NULL);
+	g_io_add_watch(audio_io, cond, audio_watch_cb, user_data);
 
 	info("Audio IPC: successfully connected");
 
 	return FALSE;
 }
 
-void audio_ipc_init(void)
+void audio_ipc_init(GDestroyNotify destroy)
 {
 	audio_io = ipc_connect(BLUEZ_AUDIO_SK_PATH, sizeof(BLUEZ_AUDIO_SK_PATH),
-							audio_connect_cb);
+						audio_connect_cb, destroy);
 }
 
 void audio_ipc_cleanup(void)

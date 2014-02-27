@@ -38,6 +38,11 @@ void device_store_cached_name(struct btd_device *dev, const char *name);
 void device_get_name(struct btd_device *device, char *name, size_t len);
 bool device_name_known(struct btd_device *device);
 void device_set_class(struct btd_device *device, uint32_t class);
+void device_update_addr(struct btd_device *device, const bdaddr_t *bdaddr,
+							uint8_t bdaddr_type);
+void device_set_bredr_support(struct btd_device *device, bool bredr);
+void device_update_last_seen(struct btd_device *device, uint8_t bdaddr_type);
+void device_merge_duplicate(struct btd_device *dev, struct btd_device *dup);
 uint32_t btd_device_get_class(struct btd_device *device);
 uint16_t btd_device_get_vendor(struct btd_device *device);
 uint16_t btd_device_get_vendor_src(struct btd_device *device);
@@ -62,21 +67,21 @@ void device_remove_profile(gpointer a, gpointer b);
 struct btd_adapter *device_get_adapter(struct btd_device *device);
 const bdaddr_t *device_get_address(struct btd_device *device);
 const char *device_get_path(const struct btd_device *device);
-gboolean device_is_bredr(struct btd_device *device);
-gboolean device_is_le(struct btd_device *device);
 gboolean device_is_temporary(struct btd_device *device);
-gboolean device_is_paired(struct btd_device *device);
-gboolean device_is_bonded(struct btd_device *device);
+bool device_is_paired(struct btd_device *device, uint8_t bdaddr_type);
+bool device_is_bonded(struct btd_device *device, uint8_t bdaddr_type);
 gboolean device_is_trusted(struct btd_device *device);
-void device_set_paired(struct btd_device *device, gboolean paired);
+void device_set_paired(struct btd_device *dev, uint8_t bdaddr_type);
 void btd_device_set_temporary(struct btd_device *device, gboolean temporary);
 void btd_device_set_trusted(struct btd_device *device, gboolean trusted);
-void device_set_bonded(struct btd_device *device, gboolean bonded);
+void device_set_bonded(struct btd_device *device, uint8_t bdaddr_type);
 void device_set_legacy(struct btd_device *device, bool legacy);
 void device_set_rssi(struct btd_device *device, int8_t rssi);
-gboolean btd_device_is_connected(struct btd_device *device);
+bool btd_device_is_connected(struct btd_device *dev);
+uint8_t btd_device_get_bdaddr_type(struct btd_device *dev);
 bool device_is_retrying(struct btd_device *device);
-void device_bonding_complete(struct btd_device *device, uint8_t status);
+void device_bonding_complete(struct btd_device *device, uint8_t bdaddr_type,
+							uint8_t status);
 gboolean device_is_bonding(struct btd_device *device, const char *sender);
 void device_bonding_attempt_failed(struct btd_device *device, uint8_t status);
 void device_bonding_failed(struct btd_device *device, uint8_t status);
@@ -94,8 +99,8 @@ int device_notify_pincode(struct btd_device *device, gboolean secure,
 							const char *pincode);
 void device_cancel_authentication(struct btd_device *device, gboolean aborted);
 gboolean device_is_authenticating(struct btd_device *device);
-void device_add_connection(struct btd_device *device);
-void device_remove_connection(struct btd_device *device);
+void device_add_connection(struct btd_device *dev, uint8_t bdaddr_type);
+void device_remove_connection(struct btd_device *device, uint8_t bdaddr_type);
 void device_request_disconnect(struct btd_device *device, DBusMessage *msg);
 
 typedef void (*disconnect_watch) (struct btd_device *device, gboolean removal,

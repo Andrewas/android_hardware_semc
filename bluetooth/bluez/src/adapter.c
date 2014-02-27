@@ -59,7 +59,7 @@
 #include "profile.h"
 #include "dbus-common.h"
 #include "error.h"
-#include "glib-helper.h"
+#include "uuid-helper.h"
 #include "agent.h"
 #include "storage.h"
 #include "attrib/gattrib.h"
@@ -103,6 +103,30 @@ static uint8_t mgmt_version = 0;
 static uint8_t mgmt_revision = 0;
 
 static GSList *adapter_drivers = NULL;
+
+struct link_key_info {
+	bdaddr_t bdaddr;
+	unsigned char key[16];
+	uint8_t type;
+	uint8_t pin_len;
+};
+
+struct smp_ltk_info {
+	bdaddr_t bdaddr;
+	uint8_t bdaddr_type;
+	uint8_t authenticated;
+	bool master;
+	uint8_t enc_size;
+	uint16_t ediv;
+	uint8_t rand[8];
+	uint8_t val[16];
+};
+
+struct irk_info {
+	bdaddr_t bdaddr;
+	uint8_t bdaddr_type;
+	uint8_t val[16];
+};
 
 struct watch_client {
 	struct btd_adapter *adapter;
@@ -405,6 +429,7 @@ static void store_adapter_info(struct btd_adapter *adapter)
 static void trigger_pairable_timeout(struct btd_adapter *adapter);
 static void adapter_start(struct btd_adapter *adapter);
 static void adapter_stop(struct btd_adapter *adapter);
+static void trigger_passive_scanning(struct btd_adapter *adapter);
 
 static void settings_changed(struct btd_adapter *adapter, uint32_t settings)
 {
@@ -432,6 +457,12 @@ static void settings_changed(struct btd_adapter *adapter, uint32_t settings)
 					btd_exit();
 			}
 		}
+	}
+
+	if (changed_mask & MGMT_SETTING_LE) {
+		if ((adapter->current_settings & MGMT_SETTING_POWERED) &&
+				(adapter->current_settings & MGMT_SETTING_LE))
+			trigger_passive_scanning(adapter);
 	}
 
 	if (changed_mask & MGMT_SETTING_CONNECTABLE)
@@ -1036,8 +1067,8 @@ static void service_auth_cancel(struct service_auth *auth)
 	g_free(auth);
 }
 
-static void adapter_remove_device(struct btd_adapter *adapter,
-						struct btd_device *dev)
+void btd_adapter_remove_device(struct btd_adapter *adapter,
+				struct btd_device *dev)
 {
 	GList *l;
 
@@ -1531,7 +1562,7 @@ static gboolean remove_temp_devices(gpointer user_data)
 		next = g_slist_next(l);
 
 		if (device_is_temporary(dev))
-			adapter_remove_device(adapter, dev);
+			btd_adapter_remove_device(adapter, dev);
 	}
 
 	return FALSE;
@@ -2099,7 +2130,7 @@ static gboolean property_get_uuids(const GDBusPropertyTable *property,
 
 		dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING,
 								&uuid);
-		g_free(uuid);
+		free(uuid);
 	}
 
 	dbus_message_iter_close_container(iter, &entry);
@@ -2159,7 +2190,7 @@ static DBusMessage *remove_device(DBusConnection *conn,
 	btd_device_set_temporary(device, TRUE);
 
 	if (!btd_device_is_connected(device)) {
-		adapter_remove_device(adapter, device);
+		btd_adapter_remove_device(adapter, device);
 		return dbus_message_new_method_return(msg);
 	}
 
@@ -2237,55 +2268,110 @@ failed:
 	return info;
 }
 
-static struct smp_ltk_info *get_ltk_info(GKeyFile *key_file, const char *peer)
+static struct smp_ltk_info *get_ltk(GKeyFile *key_file, const char *peer,
+					uint8_t peer_type, const char *group)
 {
 	struct smp_ltk_info *ltk = NULL;
+	GError *gerr = NULL;
+	bool master;
 	char *key;
 	char *rand = NULL;
-	char *type = NULL;
-	uint8_t bdaddr_type;
 
-	key = g_key_file_get_string(key_file, "LongTermKey", "Key", NULL);
+	key = g_key_file_get_string(key_file, group, "Key", NULL);
 	if (!key || strlen(key) != 34)
 		goto failed;
 
-	rand = g_key_file_get_string(key_file, "LongTermKey", "Rand", NULL);
+	rand = g_key_file_get_string(key_file, group, "Rand", NULL);
 	if (!rand || strlen(rand) != 18)
-		goto failed;
-
-	type = g_key_file_get_string(key_file, "General", "AddressType", NULL);
-	if (!type)
-		goto failed;
-
-	if (g_str_equal(type, "public"))
-		bdaddr_type = BDADDR_LE_PUBLIC;
-	else if (g_str_equal(type, "static"))
-		bdaddr_type = BDADDR_LE_RANDOM;
-	else
 		goto failed;
 
 	ltk = g_new0(struct smp_ltk_info, 1);
 
+	/* Default to assuming a master key */
+	ltk->master = true;
+
 	str2ba(peer, &ltk->bdaddr);
-	ltk->bdaddr_type = bdaddr_type;
+	ltk->bdaddr_type = peer_type;
+
+	/*
+	 * Long term keys should respond to an identity address which can
+	 * either be a public address or a random static address. Keys
+	 * stored for resolvable random and unresolvable random addresses
+	 * are ignored.
+	 *
+	 * This is an extra sanity check for older kernel versions or older
+	 * daemons that might have been instructed to store long term keys
+	 * for these temporary addresses.
+	 */
+	if (ltk->bdaddr_type == BDADDR_LE_RANDOM &&
+					(ltk->bdaddr.b[5] & 0xc0) != 0xc0) {
+		g_free(ltk);
+		ltk = NULL;
+		goto failed;
+	}
+
 	str2buf(&key[2], ltk->val, sizeof(ltk->val));
 	str2buf(&rand[2], ltk->rand, sizeof(ltk->rand));
 
-	ltk->authenticated = g_key_file_get_integer(key_file, "LongTermKey",
+	ltk->authenticated = g_key_file_get_integer(key_file, group,
 							"Authenticated", NULL);
-	ltk->master = g_key_file_get_integer(key_file, "LongTermKey", "Master",
-						NULL);
-	ltk->enc_size = g_key_file_get_integer(key_file, "LongTermKey",
-						"EncSize", NULL);
-	ltk->ediv = g_key_file_get_integer(key_file, "LongTermKey", "EDiv",
-						NULL);
+	ltk->enc_size = g_key_file_get_integer(key_file, group, "EncSize",
+									NULL);
+	ltk->ediv = g_key_file_get_integer(key_file, group, "EDiv", NULL);
+
+	master = g_key_file_get_boolean(key_file, group, "Master", &gerr);
+	if (gerr)
+		g_error_free(gerr);
+	else
+		ltk->master = master;
 
 failed:
 	g_free(key);
 	g_free(rand);
-	g_free(type);
 
 	return ltk;
+}
+
+static GSList *get_ltk_info(GKeyFile *key_file, const char *peer,
+							uint8_t bdaddr_type)
+{
+	struct smp_ltk_info *ltk;
+	GSList *l = NULL;
+
+	DBG("%s", peer);
+
+	ltk = get_ltk(key_file, peer, bdaddr_type, "LongTermKey");
+	if (ltk)
+		l = g_slist_append(l, ltk);
+
+	ltk = get_ltk(key_file, peer, bdaddr_type, "SlaveLongTermKey");
+	if (ltk) {
+		ltk->master = false;
+		l = g_slist_append(l, ltk);
+	}
+
+	return l;
+}
+
+static struct irk_info *get_irk_info(GKeyFile *key_file, const char *peer,
+							uint8_t bdaddr_type)
+{
+	struct irk_info *irk;
+	char *str;
+
+	str = g_key_file_get_string(key_file, "IdentityResolvingKey", "Key", NULL);
+	if (!str || strlen(str) != 34)
+		return NULL;
+
+	irk = g_new0(struct irk_info, 1);
+
+	str2ba(peer, &irk->bdaddr);
+	irk->bdaddr_type = bdaddr_type;
+	str2buf(&str[2], irk->val, sizeof(irk->val));
+
+	g_free(str);
+
+	return irk;
 }
 
 static void load_link_keys_complete(uint8_t status, uint16_t length,
@@ -2444,7 +2530,7 @@ static void load_ltks(struct btd_adapter *adapter, GSList *keys)
 		memcpy(key->val, info->val, sizeof(info->val));
 		memcpy(key->rand, info->rand, sizeof(info->rand));
 		memcpy(&key->ediv, &info->ediv, sizeof(key->ediv));
-		key->authenticated = info->authenticated;
+		key->type = info->authenticated;
 		key->master = info->master;
 		key->enc_size = info->enc_size;
 	}
@@ -2470,12 +2556,105 @@ static void load_ltks(struct btd_adapter *adapter, GSList *keys)
 						load_ltks_timeout, adapter);
 }
 
+static void load_irks_complete(uint8_t status, uint16_t length,
+					const void *param, void *user_data)
+{
+	struct btd_adapter *adapter = user_data;
+
+	if (status == MGMT_STATUS_UNKNOWN_COMMAND) {
+		info("Load IRKs failed: Kernel doesn't support LE Privacy");
+		return;
+	}
+
+	if (status != MGMT_STATUS_SUCCESS) {
+		error("Failed to load IRKs for hci%u: %s (0x%02x)",
+				adapter->dev_id, mgmt_errstr(status), status);
+		return;
+	}
+
+	DBG("IRKs loaded for hci%u", adapter->dev_id);
+}
+
+static void load_irks(struct btd_adapter *adapter, GSList *irks)
+{
+	struct mgmt_cp_load_irks *cp;
+	struct mgmt_irk_info *irk;
+	size_t irk_count, cp_size;
+	unsigned int id;
+	GSList *l;
+
+	/*
+	 * If the controller does not support LE Privacy operation,
+	 * there is no support for loading identity resolving keys
+	 * into the kernel.
+	 */
+	if (!(adapter->supported_settings & MGMT_SETTING_PRIVACY))
+		return;
+
+	irk_count = g_slist_length(irks);
+
+	DBG("hci%u irks %zu", adapter->dev_id, irk_count);
+
+	cp_size = sizeof(*cp) + (irk_count * sizeof(*irk));
+
+	cp = g_try_malloc0(cp_size);
+	if (cp == NULL) {
+		error("No memory for IRKs for hci%u", adapter->dev_id);
+		return;
+	}
+
+	/*
+	 * Even if the list of stored keys is empty, it is important to
+	 * load an empty list into the kernel. That way we tell the
+	 * kernel that we are able to handle New IRK events.
+	 */
+	cp->irk_count = htobs(irk_count);
+
+	for (l = irks, irk = cp->irks; l != NULL; l = g_slist_next(l), irk++) {
+		struct irk_info *info = l->data;
+
+		bacpy(&irk->addr.bdaddr, &info->bdaddr);
+		irk->addr.type = info->bdaddr_type;
+		memcpy(irk->val, info->val, sizeof(irk->val));
+	}
+
+	id = mgmt_send(adapter->mgmt, MGMT_OP_LOAD_IRKS, adapter->dev_id,
+			cp_size, cp, load_irks_complete, adapter, NULL);
+
+	g_free(cp);
+
+	if (id == 0)
+		error("Failed to IRKs for hci%u", adapter->dev_id);
+}
+
+static uint8_t get_le_addr_type(GKeyFile *keyfile)
+{
+	uint8_t addr_type;
+	char *type;
+
+	type = g_key_file_get_string(keyfile, "General", "AddressType", NULL);
+	if (!type)
+		return BDADDR_LE_PUBLIC;
+
+	if (g_str_equal(type, "public"))
+		addr_type = BDADDR_LE_PUBLIC;
+	else if (g_str_equal(type, "static"))
+		addr_type = BDADDR_LE_RANDOM;
+	else
+		addr_type = BDADDR_LE_PUBLIC;
+
+	g_free(type);
+
+	return addr_type;
+}
+
 static void load_devices(struct btd_adapter *adapter)
 {
 	char filename[PATH_MAX + 1];
 	char srcaddr[18];
 	GSList *keys = NULL;
 	GSList *ltks = NULL;
+	GSList *irks = NULL;
 	DIR *dir;
 	struct dirent *entry;
 
@@ -2495,8 +2674,9 @@ static void load_devices(struct btd_adapter *adapter)
 		char filename[PATH_MAX + 1];
 		GKeyFile *key_file;
 		struct link_key_info *key_info;
-		struct smp_ltk_info *ltk_info;
-		GSList *list;
+		GSList *list, *ltk_info;
+		struct irk_info *irk_info;
+		uint8_t bdaddr_type;
 
 		if (entry->d_type != DT_DIR || bachk(entry->d_name) < 0)
 			continue;
@@ -2511,9 +2691,14 @@ static void load_devices(struct btd_adapter *adapter)
 		if (key_info)
 			keys = g_slist_append(keys, key_info);
 
-		ltk_info = get_ltk_info(key_file, entry->d_name);
-		if (ltk_info)
-			ltks = g_slist_append(ltks, ltk_info);
+		bdaddr_type = get_le_addr_type(key_file);
+
+		ltk_info = get_ltk_info(key_file, entry->d_name, bdaddr_type);
+		ltks = g_slist_concat(ltks, ltk_info);
+
+		irk_info = get_irk_info(key_file, entry->d_name, bdaddr_type);
+		if (irk_info)
+			irks = g_slist_append(irks, irk_info);
 
 		list = g_slist_find_custom(adapter->devices, entry->d_name,
 							device_address_cmp);
@@ -2539,7 +2724,10 @@ static void load_devices(struct btd_adapter *adapter)
 device_exist:
 		if (key_info || ltk_info) {
 			device_set_paired(device, TRUE);
-			device_set_bonded(device, TRUE);
+			if (key_info)
+				device_set_bonded(device, BDADDR_BREDR);
+			if (ltk_info)
+				device_set_bonded(device, bdaddr_type);
 		}
 
 free:
@@ -2553,6 +2741,8 @@ free:
 
 	load_ltks(adapter, ltks);
 	g_slist_free_full(ltks, g_free);
+	load_irks(adapter, irks);
+	g_slist_free_full(irks, g_free);
 }
 
 int btd_adapter_block_address(struct btd_adapter *adapter,
@@ -2673,14 +2863,15 @@ void adapter_remove_profile(struct btd_adapter *adapter, gpointer p)
 }
 
 static void adapter_add_connection(struct btd_adapter *adapter,
-						struct btd_device *device)
+						struct btd_device *device,
+						uint8_t bdaddr_type)
 {
+	device_add_connection(device, bdaddr_type);
+
 	if (g_slist_find(adapter->connections, device)) {
 		error("Device is already marked as connected");
 		return;
 	}
-
-	device_add_connection(device);
 
 	adapter->connections = g_slist_append(adapter->connections, device);
 }
@@ -2724,7 +2915,7 @@ static void get_connections_complete(uint8_t status, uint16_t length,
 		device = btd_adapter_get_device(adapter, &addr->bdaddr,
 								addr->type);
 		if (device)
-			adapter_add_connection(adapter, device);
+			adapter_add_connection(adapter, device, addr->type);
 	}
 }
 
@@ -2958,7 +3149,7 @@ static void adapter_free(gpointer user_data)
 	g_free(adapter->system_name);
 	g_free(adapter->stored_alias);
 	g_free(adapter->current_alias);
-	g_free(adapter->modalias);
+	free(adapter->modalias);
 	g_free(adapter);
 }
 
@@ -3283,7 +3474,7 @@ static gboolean record_has_uuid(const sdp_record_t *rec,
 
 		ret = strcasecmp(uuid, profile_uuid);
 
-		g_free(uuid);
+		free(uuid);
 
 		if (ret == 0)
 			return TRUE;
@@ -3424,8 +3615,8 @@ static void convert_sdp_entry(char *key, char *value, void *user_data)
 
 failed:
 	sdp_record_free(rec);
-	g_free(prim_uuid);
-	g_free(att_uuid);
+	free(prim_uuid);
+	free(att_uuid);
 }
 
 static void convert_primaries_entry(char *key, char *value, void *user_data)
@@ -3506,7 +3697,7 @@ static void convert_primaries_entry(char *key, char *value, void *user_data)
 
 end:
 	g_free(data);
-	g_free(prim_uuid);
+	free(prim_uuid);
 	g_key_file_free(key_file);
 }
 
@@ -4119,6 +4310,11 @@ static void update_found_devices(struct btd_adapter *adapter,
 		return;
 	}
 
+	device_update_last_seen(dev, bdaddr_type);
+
+	if (bdaddr_type != BDADDR_BREDR && !(eir_data.flags & EIR_BREDR_UNSUP))
+		device_set_bredr_support(dev, true);
+
 	if (eir_data.name != NULL && eir_data.name_complete)
 		device_store_cached_name(dev, eir_data.name);
 
@@ -4192,7 +4388,7 @@ connect_le:
 	 * connect_list stop passive scanning so that a connection
 	 * attempt to it can be made
 	 */
-	if (device_is_le(dev) && !btd_device_is_connected(dev) &&
+	if (bdaddr_type != BDADDR_BREDR && !btd_device_is_connected(dev) &&
 				g_slist_find(adapter->connect_list, dev)) {
 		adapter->connect_le = dev;
 		stop_passive_scanning(adapter);
@@ -4248,7 +4444,8 @@ struct agent *adapter_get_agent(struct btd_adapter *adapter)
 }
 
 static void adapter_remove_connection(struct btd_adapter *adapter,
-						struct btd_device *device)
+						struct btd_device *device,
+						uint8_t bdaddr_type)
 {
 	DBG("");
 
@@ -4257,18 +4454,22 @@ static void adapter_remove_connection(struct btd_adapter *adapter,
 		return;
 	}
 
-	device_remove_connection(device);
-
-	adapter->connections = g_slist_remove(adapter->connections, device);
+	device_remove_connection(device, bdaddr_type);
 
 	if (device_is_authenticating(device))
 		device_cancel_authentication(device, TRUE);
+
+	/* If another bearer is still connected */
+	if (btd_device_is_connected(device))
+		return;
+
+	adapter->connections = g_slist_remove(adapter->connections, device);
 
 	if (device_is_temporary(device) && !device_is_retrying(device)) {
 		const char *path = device_get_path(device);
 
 		DBG("Removing temporary device %s", path);
-		adapter_remove_device(adapter, device);
+		btd_adapter_remove_device(adapter, device);
 	}
 }
 
@@ -4295,7 +4496,11 @@ static void adapter_stop(struct btd_adapter *adapter)
 
 	while (adapter->connections) {
 		struct btd_device *device = adapter->connections->data;
-		adapter_remove_connection(adapter, device);
+		uint8_t addr_type = btd_device_get_bdaddr_type(device);
+
+		adapter_remove_connection(adapter, device, BDADDR_BREDR);
+		if (addr_type != BDADDR_BREDR)
+			adapter_remove_connection(adapter, device, addr_type);
 	}
 
 	g_dbus_emit_property_changed(dbus_conn, adapter->path,
@@ -4967,7 +5172,7 @@ static void bonding_complete(struct btd_adapter *adapter,
 		device = btd_adapter_find_device(adapter, bdaddr);
 
 	if (device != NULL)
-		device_bonding_complete(device, status);
+		device_bonding_complete(device, addr_type, status);
 
 	resume_discovery(adapter);
 
@@ -5152,7 +5357,7 @@ static void dev_disconnected(struct btd_adapter *adapter,
 
 	device = btd_adapter_find_device(adapter, &addr->bdaddr);
 	if (device)
-		adapter_remove_connection(adapter, device);
+		adapter_remove_connection(adapter, device, addr->type);
 
 	bonding_attempt_complete(adapter, &addr->bdaddr, addr->type,
 						MGMT_STATUS_DISCONNECTED);
@@ -5291,7 +5496,7 @@ static void new_link_key_callback(uint16_t index, uint16_t length,
 		store_link_key(adapter, device, key->val, key->type,
 								key->pin_len);
 
-		device_set_bonded(device, TRUE);
+		device_set_bonded(device, BDADDR_BREDR);
 
 		if (device_is_temporary(device))
 			btd_device_set_temporary(device, FALSE);
@@ -5306,6 +5511,7 @@ static void store_longtermkey(const bdaddr_t *local, const bdaddr_t *peer,
 				uint8_t enc_size, uint16_t ediv,
 				const uint8_t rand[8])
 {
+	const char *group = master ? "LongTermKey" : "SlaveLongTermKey";
 	char adapter_addr[18];
 	char device_addr[18];
 	char filename[PATH_MAX + 1];
@@ -5326,25 +5532,27 @@ static void store_longtermkey(const bdaddr_t *local, const bdaddr_t *peer,
 	key_file = g_key_file_new();
 	g_key_file_load_from_file(key_file, filename, 0, NULL);
 
+	/* Old files may contain this so remove it in case it exists */
+	g_key_file_remove_key(key_file, "LongTermKey", "Master", NULL);
+
 	key_str[0] = '0';
 	key_str[1] = 'x';
 	for (i = 0; i < 16; i++)
 		sprintf(key_str + 2 + (i * 2), "%2.2X", key[i]);
 
-	g_key_file_set_string(key_file, "LongTermKey", "Key", key_str);
+	g_key_file_set_string(key_file, group, "Key", key_str);
 
-	g_key_file_set_integer(key_file, "LongTermKey", "Authenticated",
-				authenticated);
-	g_key_file_set_integer(key_file, "LongTermKey", "Master", master);
-	g_key_file_set_integer(key_file, "LongTermKey", "EncSize", enc_size);
-	g_key_file_set_integer(key_file, "LongTermKey", "EDiv", ediv);
+	g_key_file_set_integer(key_file, group, "Authenticated",
+							authenticated);
+	g_key_file_set_integer(key_file, group, "EncSize", enc_size);
+	g_key_file_set_integer(key_file, group, "EDiv", ediv);
 
 	rand_str[0] = '0';
 	rand_str[1] = 'x';
 	for (i = 0; i < 8; i++)
 		sprintf(rand_str + 2 + (i * 2), "%2.2X", rand[i]);
 
-	g_key_file_set_string(key_file, "LongTermKey", "Rand", rand_str);
+	g_key_file_set_string(key_file, group, "Rand", rand_str);
 
 	create_file(filename, S_IRUSR | S_IWUSR);
 
@@ -5362,6 +5570,7 @@ static void new_long_term_key_callback(uint16_t index, uint16_t length,
 	const struct mgmt_addr_info *addr = &ev->key.addr;
 	struct btd_adapter *adapter = user_data;
 	struct btd_device *device;
+	bool persistent;
 	char dst[18];
 
 	if (length < sizeof(*ev)) {
@@ -5371,8 +5580,8 @@ static void new_long_term_key_callback(uint16_t index, uint16_t length,
 
 	ba2str(&addr->bdaddr, dst);
 
-	DBG("hci%u new LTK for %s authenticated %u enc_size %u",
-		adapter->dev_id, dst, ev->key.authenticated, ev->key.enc_size);
+	DBG("hci%u new LTK for %s type %u enc_size %u",
+		adapter->dev_id, dst, ev->key.type, ev->key.enc_size);
 
 	device = btd_adapter_get_device(adapter, &addr->bdaddr, addr->type);
 	if (!device) {
@@ -5380,16 +5589,33 @@ static void new_long_term_key_callback(uint16_t index, uint16_t length,
 		return;
 	}
 
-	if (ev->store_hint) {
+	/*
+	 * Some older kernel versions set store_hint for long term keys
+	 * from resolvable and unresolvable random addresses, but there
+	 * is no point in storing these. Next time around the device
+	 * address will be invalid.
+	 *
+	 * So only for identity addresses (public and static random) use
+	 * the store_hint as an indication if the long term key should
+	 * be persistently stored.
+	 *
+	 */
+	if (addr->type == BDADDR_LE_RANDOM &&
+				(addr->bdaddr.b[5] & 0xc0) != 0xc0)
+		persistent = false;
+	else
+		persistent = !!ev->store_hint;
+
+	if (persistent) {
 		const struct mgmt_ltk_info *key = &ev->key;
 		const bdaddr_t *bdaddr = btd_adapter_get_address(adapter);
 
 		store_longtermkey(bdaddr, &key->addr.bdaddr,
 					key->addr.type, key->val, key->master,
-					key->authenticated, key->enc_size,
+					key->type, key->enc_size,
 					key->ediv, key->rand);
 
-		device_set_bonded(device, TRUE);
+		device_set_bonded(device, addr->type);
 
 		if (device_is_temporary(device))
 			btd_device_set_temporary(device, FALSE);
@@ -5397,6 +5623,97 @@ static void new_long_term_key_callback(uint16_t index, uint16_t length,
 
 	if (ev->key.master)
 		bonding_complete(adapter, &addr->bdaddr, addr->type, 0);
+}
+
+static void store_irk(struct btd_adapter *adapter, const bdaddr_t *peer,
+				uint8_t bdaddr_type, const unsigned char *key)
+{
+	char adapter_addr[18];
+	char device_addr[18];
+	char filename[PATH_MAX + 1];
+	GKeyFile *key_file;
+	char *store_data;
+	char str[35];
+	size_t length = 0;
+	int i;
+
+	ba2str(&adapter->bdaddr, adapter_addr);
+	ba2str(peer, device_addr);
+
+	snprintf(filename, PATH_MAX, STORAGEDIR "/%s/%s/info", adapter_addr,
+								device_addr);
+	filename[PATH_MAX] = '\0';
+
+	key_file = g_key_file_new();
+	g_key_file_load_from_file(key_file, filename, 0, NULL);
+
+	str[0] = '0';
+	str[1] = 'x';
+	for (i = 0; i < 16; i++)
+		sprintf(str + 2 + (i * 2), "%2.2X", key[i]);
+
+	g_key_file_set_string(key_file, "IdentityResolvingKey", "Key", str);
+
+	create_file(filename, S_IRUSR | S_IWUSR);
+
+	store_data = g_key_file_to_data(key_file, &length, NULL);
+	g_file_set_contents(filename, store_data, length, NULL);
+	g_free(store_data);
+
+	g_key_file_free(key_file);
+}
+
+static void new_irk_callback(uint16_t index, uint16_t length,
+					const void *param, void *user_data)
+{
+	const struct mgmt_ev_new_irk *ev = param;
+	const struct mgmt_addr_info *addr = &ev->irk.addr;
+	const struct mgmt_irk_info *irk = &ev->irk;
+	struct btd_adapter *adapter = user_data;
+	struct btd_device *device, *duplicate;
+	bool persistent;
+	char dst[18], rpa[18];
+
+	if (length < sizeof(*ev)) {
+		error("Too small New IRK event");
+		return;
+	}
+
+	ba2str(&addr->bdaddr, dst);
+	ba2str(&ev->rpa, rpa);
+
+	DBG("hci%u new IRK for %s RPA %s", adapter->dev_id, dst, rpa);
+
+	if (bacmp(&ev->rpa, BDADDR_ANY)) {
+		device = btd_adapter_get_device(adapter, &ev->rpa,
+							BDADDR_LE_RANDOM);
+		duplicate = btd_adapter_find_device(adapter, &addr->bdaddr);
+		if (duplicate == device)
+			duplicate = NULL;
+	} else {
+		device = btd_adapter_get_device(adapter, &addr->bdaddr,
+								addr->type);
+		duplicate = NULL;
+	}
+
+	if (!device) {
+		error("Unable to get device object for %s", dst);
+		return;
+	}
+
+	device_update_addr(device, &addr->bdaddr, addr->type);
+
+	if (duplicate)
+		device_merge_duplicate(device, duplicate);
+
+	persistent = !!ev->store_hint;
+	if (!persistent)
+		return;
+
+	store_irk(adapter, &addr->bdaddr, addr->type, irk->val);
+
+	if (device_is_temporary(device))
+		btd_device_set_temporary(device, FALSE);
 }
 
 int adapter_set_io_capability(struct btd_adapter *adapter, uint8_t io_cap)
@@ -5739,7 +6056,7 @@ static void connected_callback(uint16_t index, uint16_t length,
 	if (eir_data.class != 0)
 		device_set_class(device, eir_data.class);
 
-	adapter_add_connection(adapter, device);
+	adapter_add_connection(adapter, device, ev->addr.type);
 
 	if (eir_data.name != NULL) {
 		device_store_cached_name(device, eir_data.name);
@@ -5834,7 +6151,7 @@ static void connect_failed_callback(uint16_t index, uint16_t length,
 	 * when it is temporary. */
 	if (device && !device_is_bonding(device, NULL)
 						&& device_is_temporary(device))
-		adapter_remove_device(adapter, device);
+		btd_adapter_remove_device(adapter, device);
 }
 
 static void unpaired_callback(uint16_t index, uint16_t length,
@@ -5865,7 +6182,7 @@ static void unpaired_callback(uint16_t index, uint16_t length,
 	if (btd_device_is_connected(device))
 		device_request_disconnect(device, NULL);
 	else
-		adapter_remove_device(adapter, device);
+		btd_adapter_remove_device(adapter, device);
 }
 
 static void read_info_complete(uint8_t status, uint16_t length,
@@ -5980,6 +6297,11 @@ static void read_info_complete(uint8_t status, uint16_t length,
 	mgmt_register(adapter->mgmt, MGMT_EV_NEW_LONG_TERM_KEY,
 						adapter->dev_id,
 						new_long_term_key_callback,
+						adapter, NULL);
+
+	mgmt_register(adapter->mgmt, MGMT_EV_NEW_IRK,
+						adapter->dev_id,
+						new_irk_callback,
 						adapter, NULL);
 
 	mgmt_register(adapter->mgmt, MGMT_EV_DEVICE_BLOCKED,

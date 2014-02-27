@@ -39,7 +39,7 @@
 
 #include <glib.h>
 
-#include "log.h"
+#include "src/log.h"
 #include "avdtp.h"
 
 #define AVDTP_PSM 25
@@ -398,6 +398,8 @@ struct avdtp {
 	struct pending_req *req;
 
 	GSList *disconnect;
+
+	bool shutdown;
 };
 
 static GSList *lseps = NULL;
@@ -913,6 +915,11 @@ static void avdtp_sep_set_state(struct avdtp *session,
 		session->streams = g_slist_remove(session->streams, stream);
 		stream_free(stream);
 	}
+
+	if (session->io && session->shutdown && session->streams == NULL) {
+		int sock = g_io_channel_unix_get_fd(session->io);
+		shutdown(sock, SHUT_RDWR);
+	}
 }
 
 static void finalize_discovery(struct avdtp *session, int err)
@@ -1289,11 +1296,13 @@ static gboolean avdtp_setconf_cmd(struct avdtp *session, uint8_t transaction,
 					&stream->codec,
 					&stream->delay_reporting);
 
-	/* Verify that the Media Transport capability's length = 0. Reject otherwise */
+	/* Verify that the Media Transport capability's length = 0.
+	 * Reject otherwise */
 	for (l = stream->caps; l != NULL; l = g_slist_next(l)) {
 		struct avdtp_service_capability *cap = l->data;
 
-		if (cap->category == AVDTP_MEDIA_TRANSPORT && cap->length != 0) {
+		if (cap->category == AVDTP_MEDIA_TRANSPORT &&
+							cap->length != 0) {
 			err = AVDTP_BAD_MEDIA_TRANSPORT_FORMAT;
 			goto failed_stream;
 		}
@@ -1363,7 +1372,7 @@ static gboolean avdtp_getconf_cmd(struct avdtp *session, uint8_t transaction,
 		goto failed;
 	}
 
-	for (l = sep->stream->caps, rsp_size = 0; l != NULL; l = g_slist_next(l)) {
+	for (l = sep->stream->caps, rsp_size = 0; l; l = g_slist_next(l)) {
 		struct avdtp_service_capability *cap = l->data;
 
 		if (rsp_size + cap->length + 2 > (int) sizeof(buf))
@@ -1824,7 +1833,8 @@ static enum avdtp_parse_result avdtp_parse_data(struct avdtp *session,
 	switch (header->packet_type) {
 	case AVDTP_PKT_TYPE_SINGLE:
 		if (size < sizeof(*single)) {
-			error("Received too small single packet (%zu bytes)", size);
+			error("Received too small single packet (%zu bytes)",
+									size);
 			return PARSE_ERROR;
 		}
 		if (session->in.active) {
@@ -1845,7 +1855,8 @@ static enum avdtp_parse_result avdtp_parse_data(struct avdtp *session,
 		break;
 	case AVDTP_PKT_TYPE_START:
 		if (size < sizeof(*start)) {
-			error("Received too small start packet (%zu bytes)", size);
+			error("Received too small start packet (%zu bytes)",
+									size);
 			return PARSE_ERROR;
 		}
 		if (session->in.active) {
@@ -1889,7 +1900,8 @@ static enum avdtp_parse_result avdtp_parse_data(struct avdtp *session,
 		break;
 	case AVDTP_PKT_TYPE_END:
 		if (size < sizeof(struct avdtp_continue_header)) {
-			error("Received too small end packet (%zu bytes)", size);
+			error("Received too small end packet (%zu bytes)",
+									size);
 			return PARSE_ERROR;
 		}
 		if (!session->in.active) {
@@ -2052,6 +2064,21 @@ failed:
 	return FALSE;
 }
 
+static int set_priority(int fd, int priority)
+{
+	int err;
+
+	err = setsockopt(fd, SOL_SOCKET, SO_PRIORITY, &priority,
+							sizeof(priority));
+	if (err == 0 || errno == ENOTSOCK)
+		return 0;
+
+	err = -errno;
+	error("setsockopt(SO_PRIORITY): %s (%d)", strerror(-err), -err);
+
+	return err;
+}
+
 struct avdtp *avdtp_new(int fd, size_t imtu, size_t omtu, uint16_t version)
 {
 	struct avdtp *session;
@@ -2063,6 +2090,9 @@ struct avdtp *avdtp_new(int fd, size_t imtu, size_t omtu, uint16_t version)
 		error("dup(): %s (%d)", strerror(errno), errno);
 		return NULL;
 	}
+
+	if (set_priority(new_fd, 6) < 0)
+		return NULL;
 
 	session = g_new0(struct avdtp, 1);
 	session->io = g_io_channel_unix_new(new_fd);
@@ -2123,7 +2153,7 @@ gboolean avdtp_remove_disconnect_cb(struct avdtp *session, unsigned int id)
 void avdtp_shutdown(struct avdtp *session)
 {
 	GSList *l;
-	int sock;
+	bool aborting = false;
 
 	if (!session->io)
 		return;
@@ -2131,12 +2161,18 @@ void avdtp_shutdown(struct avdtp *session)
 	for (l = session->streams; l; l = g_slist_next(l)) {
 		struct avdtp_stream *stream = l->data;
 
-		avdtp_close(session, stream, TRUE);
+		if (stream->abort_int || avdtp_abort(session, stream) == 0)
+			aborting = true;
 	}
 
-	sock = g_io_channel_unix_get_fd(session->io);
+	if (aborting) {
+		/* defer shutdown until all streams are aborted properly */
+		session->shutdown = true;
+	} else {
+		int sock = g_io_channel_unix_get_fd(session->io);
 
-	shutdown(sock, SHUT_RDWR);
+		shutdown(sock, SHUT_RDWR);
+	}
 }
 
 static void queue_request(struct avdtp *session, struct pending_req *req,
@@ -2223,7 +2259,7 @@ static int cancel_request(struct avdtp *session, int err)
 		error("SetConfiguration: %s (%d)", strerror(err), err);
 		if (lsep && lsep->cfm && lsep->cfm->set_configuration)
 			lsep->cfm->set_configuration(session, lsep, stream,
-							&averr, lsep->user_data);
+						&averr, lsep->user_data);
 		goto failed;
 	case AVDTP_DISCOVER:
 		error("Discover: %s (%d)", strerror(err), err);
@@ -2309,6 +2345,11 @@ static int send_request(struct avdtp *session, gboolean priority,
 {
 	struct pending_req *req;
 
+	if (size > 0 && !buffer) {
+		DBG("Invalid buffer %p", buffer);
+		return -EINVAL;
+	}
+
 	if (stream && stream->abort_int && signal_id != AVDTP_ABORT) {
 		DBG("Unable to send requests while aborting");
 		return -EINVAL;
@@ -2316,10 +2357,13 @@ static int send_request(struct avdtp *session, gboolean priority,
 
 	req = g_new0(struct pending_req, 1);
 	req->signal_id = signal_id;
-	req->data = g_malloc(size);
-	memcpy(req->data, buffer, size);
 	req->data_size = size;
 	req->stream = stream;
+
+	if (size > 0) {
+		req->data = g_malloc(size);
+		memcpy(req->data, buffer, size);
+	}
 
 	return send_req(session, priority, req);
 }
@@ -2419,9 +2463,9 @@ static gboolean avdtp_get_capabilities_resp(struct avdtp *session,
 }
 
 static gboolean avdtp_set_configuration_resp(struct avdtp *session,
-						struct avdtp_stream *stream,
-						struct avdtp_single_header *resp,
-						int size)
+					struct avdtp_stream *stream,
+					struct avdtp_single_header *resp,
+					int size)
 {
 	struct avdtp_local_sep *sep = stream->lsep;
 
@@ -2436,12 +2480,14 @@ static gboolean avdtp_set_configuration_resp(struct avdtp *session,
 
 static gboolean avdtp_reconfigure_resp(struct avdtp *session,
 					struct avdtp_stream *stream,
-					struct avdtp_single_header *resp, int size)
+					struct avdtp_single_header *resp,
+					int size)
 {
 	return TRUE;
 }
 
-static gboolean avdtp_open_resp(struct avdtp *session, struct avdtp_stream *stream,
+static gboolean avdtp_open_resp(struct avdtp *session,
+				struct avdtp_stream *stream,
 				struct seid_rej *resp, int size)
 {
 	struct avdtp_local_sep *sep = stream->lsep;
@@ -2521,7 +2567,8 @@ static gboolean avdtp_delay_report_resp(struct avdtp *session,
 	struct avdtp_local_sep *sep = stream->lsep;
 
 	if (sep->cfm && sep->cfm->delay_report)
-		sep->cfm->delay_report(session, sep, stream, NULL, sep->user_data);
+		sep->cfm->delay_report(session, sep, stream, NULL,
+							sep->user_data);
 
 	return TRUE;
 }
@@ -2828,6 +2875,9 @@ gboolean avdtp_stream_set_transport(struct avdtp_stream *stream, int fd,
 	if (stream != stream->session->pending_open)
 		return FALSE;
 
+	if (set_priority(fd, 5) < 0)
+		return FALSE;
+
 	io = g_io_channel_unix_new(fd);
 
 	handle_transport_connect(stream->session, io, imtu, omtu);
@@ -2894,13 +2944,19 @@ struct avdtp_service_capability *avdtp_service_cap_new(uint8_t category,
 {
 	struct avdtp_service_capability *cap;
 
-	if (category < AVDTP_MEDIA_TRANSPORT || category > AVDTP_DELAY_REPORTING)
+	if (category < AVDTP_MEDIA_TRANSPORT ||
+					category > AVDTP_DELAY_REPORTING)
+		return NULL;
+
+	if (length > 0 && !data)
 		return NULL;
 
 	cap = g_malloc(sizeof(struct avdtp_service_capability) + length);
 	cap->category = category;
 	cap->length = length;
-	memcpy(cap->data, data, length);
+
+	if (length > 0)
+		memcpy(cap->data, data, length);
 
 	return cap;
 }

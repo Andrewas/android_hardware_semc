@@ -33,11 +33,11 @@
 #include <bluetooth/bluetooth.h>
 
 #include <glib.h>
-#include <btio/btio.h>
 
-#include "plugin.h"
-#include "log.h"
-#include "hcid.h"
+#include "btio/btio.h"
+#include "src/plugin.h"
+#include "src/log.h"
+#include "src/hcid.h"
 
 static GSList *plugins = NULL;
 
@@ -110,7 +110,7 @@ static gboolean enable_plugin(const char *name, char **cli_enable,
 	return TRUE;
 }
 
-#include "builtin.h"
+#include "src/builtin.h"
 
 gboolean plugin_init(const char *enable, const char *disable)
 {

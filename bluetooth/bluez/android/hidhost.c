@@ -2,21 +2,21 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2013-2014  Intel Corporation. All rights reserved.
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
@@ -37,13 +37,12 @@
 #include "lib/bluetooth.h"
 #include "lib/sdp.h"
 #include "lib/sdp_lib.h"
-#include "lib/uuid.h"
 #include "src/shared/mgmt.h"
 #include "src/sdp-client.h"
-#include "src/glib-helper.h"
+#include "src/uuid-helper.h"
 #include "profiles/input/uhid_copy.h"
+#include "src/log.h"
 
-#include "log.h"
 #include "hal-msg.h"
 #include "ipc.h"
 #include "hidhost.h"
@@ -125,8 +124,10 @@ static void uhid_destroy(int fd)
 	close(fd);
 }
 
-static void hid_device_free(struct hid_device *dev)
+static void hid_device_free(void *data)
 {
+	struct hid_device *dev = data;
+
 	if (dev->ctrl_watch > 0)
 		g_source_remove(dev->ctrl_watch);
 
@@ -148,9 +149,13 @@ static void hid_device_free(struct hid_device *dev)
 		uhid_destroy(dev->uhid_fd);
 
 	g_free(dev->rd_data);
-
-	devices = g_slist_remove(devices, dev);
 	g_free(dev);
+}
+
+static void hid_device_remove(struct hid_device *dev)
+{
+	devices = g_slist_remove(devices, dev);
+	hid_device_free(dev);
 }
 
 static void handle_uhid_output(struct hid_device *dev,
@@ -326,7 +331,7 @@ error:
 	if (dev->ctrl_io && !(cond & G_IO_NVAL))
 		g_io_channel_shutdown(dev->ctrl_io, TRUE, NULL);
 
-	hid_device_free(dev);
+	hid_device_remove(dev);
 
 	return FALSE;
 }
@@ -371,11 +376,11 @@ static void bt_hid_notify_get_report(struct hid_device *dev, uint8_t *buf,
 	ba2str(&dev->dst, address);
 	DBG("device %s", address);
 
-	ev_len = sizeof(*ev) + sizeof(struct hal_ev_hidhost_get_report) + 1;
+	ev_len = sizeof(*ev);
 
 	if (!((buf[0] == (HID_MSG_DATA | HID_DATA_TYPE_INPUT)) ||
 			(buf[0] == (HID_MSG_DATA | HID_DATA_TYPE_OUTPUT)) ||
-			(buf[0]	== (HID_MSG_DATA | HID_DATA_TYPE_FEATURE)))) {
+			(buf[0] == (HID_MSG_DATA | HID_DATA_TYPE_FEATURE)))) {
 		ev = g_malloc0(ev_len);
 		ev->status = buf[0];
 		bdaddr2android(&dev->dst, ev->bdaddr);
@@ -487,7 +492,7 @@ error:
 	if (dev->intr_io && !(cond & G_IO_NVAL))
 		g_io_channel_shutdown(dev->intr_io, TRUE, NULL);
 
-	hid_device_free(dev);
+	hid_device_remove(dev);
 
 	return FALSE;
 }
@@ -586,7 +591,7 @@ static void interrupt_connect_cb(GIOChannel *chan, GError *conn_err,
 
 failed:
 	bt_hid_notify_state(dev, state);
-	hid_device_free(dev);
+	hid_device_remove(dev);
 }
 
 static void control_connect_cb(GIOChannel *chan, GError *conn_err,
@@ -623,7 +628,7 @@ static void control_connect_cb(GIOChannel *chan, GError *conn_err,
 	return;
 
 failed:
-	hid_device_free(dev);
+	hid_device_remove(dev);
 }
 
 static void hid_sdp_search_cb(sdp_list_t *recs, int err, gpointer data)
@@ -647,18 +652,6 @@ static void hid_sdp_search_cb(sdp_list_t *recs, int err, gpointer data)
 	for (list = recs; list != NULL; list = list->next) {
 		sdp_record_t *rec = list->data;
 		sdp_data_t *data;
-
-		data = sdp_data_get(rec, SDP_ATTR_VENDOR_ID);
-		if (data)
-			dev->vendor = data->val.uint16;
-
-		data = sdp_data_get(rec, SDP_ATTR_PRODUCT_ID);
-		if (data)
-			dev->product = data->val.uint16;
-
-		data = sdp_data_get(rec, SDP_ATTR_VERSION);
-		if (data)
-			dev->version = data->val.uint16;
 
 		data = sdp_data_get(rec, SDP_ATTR_HID_COUNTRY_CODE);
 		if (data)
@@ -719,7 +712,56 @@ static void hid_sdp_search_cb(sdp_list_t *recs, int err, gpointer data)
 
 fail:
 	bt_hid_notify_state(dev, HAL_HIDHOST_STATE_DISCONNECTED);
-	hid_device_free(dev);
+	hid_device_remove(dev);
+}
+
+static void hid_sdp_did_search_cb(sdp_list_t *recs, int err, gpointer data)
+{
+	struct hid_device *dev = data;
+	sdp_list_t *list;
+	uuid_t uuid;
+
+	DBG("");
+
+	if (err < 0) {
+		error("Unable to get Device ID SDP record: %s", strerror(-err));
+		goto fail;
+	}
+
+	if (!recs || !recs->data) {
+		error("No SDP records found");
+		goto fail;
+	}
+
+	for (list = recs; list; list = list->next) {
+		sdp_record_t *rec = list->data;
+		sdp_data_t *data;
+
+		data = sdp_data_get(rec, SDP_ATTR_VENDOR_ID);
+		if (data)
+			dev->vendor = data->val.uint16;
+
+		data = sdp_data_get(rec, SDP_ATTR_PRODUCT_ID);
+		if (data)
+			dev->product = data->val.uint16;
+
+		data = sdp_data_get(rec, SDP_ATTR_VERSION);
+		if (data)
+			dev->version = data->val.uint16;
+	}
+
+	sdp_uuid16_create(&uuid, HID_SVCLASS_ID);
+	if (bt_search_service(&adapter_addr, &dev->dst, &uuid,
+				hid_sdp_search_cb, dev, NULL, 0) < 0) {
+		error("failed to search sdp details");
+		goto fail;
+	}
+
+	return;
+
+fail:
+	bt_hid_notify_state(dev, HAL_HIDHOST_STATE_DISCONNECTED);
+	hid_device_remove(dev);
 }
 
 static void bt_hid_connect(const void *buf, uint16_t len)
@@ -749,11 +791,11 @@ static void bt_hid_connect(const void *buf, uint16_t len)
 	ba2str(&dev->dst, addr);
 	DBG("connecting to %s", addr);
 
-	bt_string2uuid(&uuid, HID_UUID);
+	sdp_uuid16_create(&uuid, PNP_INFO_SVCLASS_ID);
 	if (bt_search_service(&adapter_addr, &dev->dst, &uuid,
-					hid_sdp_search_cb, dev, NULL, 0) < 0) {
-		error("Failed to search sdp details");
-		hid_device_free(dev);
+				hid_sdp_did_search_cb, dev, NULL, 0) < 0) {
+		error("Failed to search DeviceID SDP details");
+		hid_device_remove(dev);
 		status = HAL_STATUS_FAILED;
 		goto failed;
 	}
@@ -858,6 +900,14 @@ failed:
 
 static void bt_hid_info(const void *buf, uint16_t len)
 {
+	const struct hal_cmd_hidhost_set_info *cmd = buf;
+
+	if (len != sizeof(*cmd) + cmd->descr_len) {
+		error("Invalid hid set info size (%u bytes), terminating", len);
+		raise(SIGTERM);
+		return;
+	}
+
 	/* Data from hal_cmd_hidhost_set_info is usefull only when we create
 	 * UHID device. Once device is created all the transactions will be
 	 * done through the fd. There is no way to use this information
@@ -1242,11 +1292,11 @@ static void connect_cb(GIOChannel *chan, GError *err, gpointer user_data)
 		dev->ctrl_io = g_io_channel_ref(chan);
 		dev->uhid_fd = -1;
 
-		bt_string2uuid(&uuid, HID_UUID);
+		sdp_uuid16_create(&uuid, PNP_INFO_SVCLASS_ID);
 		if (bt_search_service(&src, &dev->dst, &uuid,
-					hid_sdp_search_cb, dev, NULL, 0) < 0) {
-			error("failed to search sdp details");
-			hid_device_free(dev);
+				hid_sdp_did_search_cb, dev, NULL, 0) < 0) {
+			error("failed to search did sdp details");
+			hid_device_remove(dev);
 			return;
 		}
 
@@ -1314,18 +1364,11 @@ bool bt_hid_register(const bdaddr_t *addr)
 	return true;
 }
 
-static void free_hid_devices(gpointer data, gpointer user_data)
-{
-	struct hid_device *dev = data;
-
-	hid_device_free(dev);
-}
-
 void bt_hid_unregister(void)
 {
 	DBG("");
 
-	g_slist_foreach(devices, free_hid_devices, NULL);
+	g_slist_free_full(devices, hid_device_free);
 	devices = NULL;
 
 	if (ctrl_io) {

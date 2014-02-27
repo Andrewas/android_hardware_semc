@@ -40,14 +40,12 @@
 #include <bluetooth/sdp.h>
 #include <bluetooth/sdp_lib.h>
 
-#include <glib.h>
-#include "glib-helper.h"
+#include "src/uuid-helper.h"
+#include "lib/mgmt.h"
 
 #include "monitor/mainloop.h"
 #include "src/shared/util.h"
 #include "src/shared/mgmt.h"
-#include "lib/mgmt.h"
-#include "eir.h"
 
 static bool monitor = false;
 static bool discovery = false;
@@ -97,6 +95,8 @@ static const char *settings_str[] = {
 				"le",
 				"advertising",
 				"secure-conn",
+				"debug-keys",
+				"privacy",
 };
 
 static void print_settings(uint32_t settings)
@@ -312,14 +312,41 @@ static void confirm_name_rsp(uint8_t status, uint16_t len,
 		printf("confirm_name succeeded for %s\n", addr);
 }
 
+static char *eir_get_name(const uint8_t *eir, uint16_t eir_len)
+{
+	uint8_t parsed = 0;
+
+	if (eir_len < 2)
+		return NULL;
+
+	while (parsed < eir_len - 1) {
+		uint8_t field_len = eir[0];
+
+		if (field_len == 0)
+			break;
+
+		parsed += field_len + 1;
+
+		if (parsed > eir_len)
+			break;
+
+		/* Check for short of complete name */
+		if (eir[1] == 0x09 || eir[1] == 0x08)
+			return strndup((char *) &eir[2], field_len - 1);
+
+		eir += field_len + 1;
+	}
+
+	return NULL;
+}
+
 static void device_found(uint16_t index, uint16_t len, const void *param,
 							void *user_data)
 {
 	const struct mgmt_ev_device_found *ev = param;
 	struct mgmt *mgmt = user_data;
-	uint32_t flags;
 	uint16_t eir_len;
-	struct eir_data eir;
+	uint32_t flags;
 
 	if (len < sizeof(*ev)) {
 		fprintf(stderr,
@@ -336,23 +363,22 @@ static void device_found(uint16_t index, uint16_t len, const void *param,
 		return;
 	}
 
-	memset(&eir, 0, sizeof(eir));
-	eir_parse(&eir, ev->eir, eir_len);
-
 	if (monitor || discovery) {
-		char addr[18];
+		char addr[18], *name;
+
 		ba2str(&ev->addr.bdaddr, addr);
 		printf("hci%u dev_found: %s type %s rssi %d "
 			"flags 0x%04x ", index, addr,
 			typestr(ev->addr.type), ev->rssi, flags);
 
-		if (eir.name)
-			printf("name %s\n", eir.name);
+		name = eir_get_name(ev->eir, eir_len);
+		if (name)
+			printf("name %s\n", name);
 		else
 			printf("eir_len %u\n", eir_len);
-	}
 
-	eir_data_free(&eir);
+		free(name);
+	}
 
 	if (discovery && (flags & MGMT_DEV_FOUND_CONFIRM_NAME)) {
 		struct mgmt_cp_confirm_name cp;
@@ -1287,7 +1313,7 @@ static void pair_rsp(uint8_t status, uint16_t len, const void *param,
 		goto done;
 	}
 
-	printf("Paired with %s\n", addr);
+	printf("Paired with %s (%s)\n", addr, typestr(rp->addr.type));
 
 done:
 	mainloop_quit();
@@ -1310,6 +1336,7 @@ static void cmd_pair(struct mgmt *mgmt, uint16_t index, int argc, char **argv)
 	struct mgmt_cp_pair_device cp;
 	uint8_t cap = 0x01;
 	uint8_t type = BDADDR_BREDR;
+	char addr[18];
 	int opt;
 
 	while ((opt = getopt_long(argc, argv, "+c:t:h", pair_options,
@@ -1344,6 +1371,9 @@ static void cmd_pair(struct mgmt *mgmt, uint16_t index, int argc, char **argv)
 	str2ba(argv[0], &cp.addr.bdaddr);
 	cp.addr.type = type;
 	cp.io_cap = cap;
+
+	ba2str(&cp.addr.bdaddr, addr);
+	printf("Pairing with %s (%s)\n", addr, typestr(cp.addr.type));
 
 	if (mgmt_send(mgmt, MGMT_OP_PAIR_DEVICE, index, sizeof(cp), &cp,
 						pair_rsp, NULL, NULL) == 0) {
@@ -1471,13 +1501,43 @@ done:
 	mainloop_quit();
 }
 
+static void unpair_usage(void)
+{
+	printf("Usage: btmgmt unpair [-t type] <remote address>\n");
+}
+
+static struct option unpair_options[] = {
+	{ "help",	0, 0, 'h' },
+	{ "type",	1, 0, 't' },
+	{ 0, 0, 0, 0 }
+};
+
 static void cmd_unpair(struct mgmt *mgmt, uint16_t index, int argc,
 								char **argv)
 {
 	struct mgmt_cp_unpair_device cp;
+	uint8_t type = BDADDR_BREDR;
+	int opt;
 
-	if (argc < 2) {
-		printf("Usage: btmgmt %s <remote address>\n", argv[0]);
+	while ((opt = getopt_long(argc, argv, "+t:h", unpair_options,
+								NULL)) != -1) {
+		switch (opt) {
+		case 't':
+			type = strtol(optarg, NULL, 0);
+			break;
+		case 'h':
+		default:
+			unpair_usage();
+			exit(EXIT_SUCCESS);
+		}
+	}
+
+	argc -= optind;
+	argv += optind;
+	optind = 0;
+
+	if (argc < 1) {
+		unpair_usage();
 		exit(EXIT_FAILURE);
 	}
 
@@ -1485,7 +1545,8 @@ static void cmd_unpair(struct mgmt *mgmt, uint16_t index, int argc,
 		index = 0;
 
 	memset(&cp, 0, sizeof(cp));
-	str2ba(argv[1], &cp.addr.bdaddr);
+	str2ba(argv[0], &cp.addr.bdaddr);
+	cp.addr.type = type;
 	cp.disconnect = 1;
 
 	if (mgmt_send(mgmt, MGMT_OP_UNPAIR_DEVICE, index, sizeof(cp), &cp,
@@ -1519,6 +1580,62 @@ static void cmd_keys(struct mgmt *mgmt, uint16_t index, int argc, char **argv)
 	if (mgmt_send(mgmt, MGMT_OP_LOAD_LINK_KEYS, index, sizeof(cp), &cp,
 						keys_rsp, NULL, NULL) == 0) {
 		fprintf(stderr, "Unable to send load_keys cmd\n");
+		exit(EXIT_FAILURE);
+	}
+}
+
+static void ltks_rsp(uint8_t status, uint16_t len, const void *param,
+							void *user_data)
+{
+	if (status != 0)
+		fprintf(stderr, "Load keys failed with status 0x%02x (%s)\n",
+						status, mgmt_errstr(status));
+	else
+		printf("Long term keys successfully loaded\n");
+
+	mainloop_quit();
+}
+
+static void cmd_ltks(struct mgmt *mgmt, uint16_t index, int argc, char **argv)
+{
+	struct mgmt_cp_load_long_term_keys cp;
+
+	if (index == MGMT_INDEX_NONE)
+		index = 0;
+
+	memset(&cp, 0, sizeof(cp));
+
+	if (mgmt_send(mgmt, MGMT_OP_LOAD_LONG_TERM_KEYS, index, sizeof(cp), &cp,
+						ltks_rsp, NULL, NULL) == 0) {
+		fprintf(stderr, "Unable to send load_ltks cmd\n");
+		exit(EXIT_FAILURE);
+	}
+}
+
+static void irks_rsp(uint8_t status, uint16_t len, const void *param,
+							void *user_data)
+{
+	if (status != 0)
+		fprintf(stderr, "Load IRKs failed with status 0x%02x (%s)\n",
+						status, mgmt_errstr(status));
+	else
+		printf("Identity Resolving Keys successfully loaded\n");
+
+	mainloop_quit();
+}
+
+static void cmd_irks(struct mgmt *mgmt, uint16_t index, int argc, char **argv)
+{
+	struct mgmt_cp_load_irks cp;
+
+	if (index == MGMT_INDEX_NONE)
+		index = 0;
+
+	memset(&cp, 0, sizeof(cp));
+
+	if (mgmt_send(mgmt, MGMT_OP_LOAD_IRKS, index, sizeof(cp), &cp,
+						irks_rsp, NULL, NULL) == 0) {
+		fprintf(stderr, "Unable to send load_irks cmd\n");
 		exit(EXIT_FAILURE);
 	}
 }
@@ -1906,6 +2023,12 @@ static void cmd_static_addr(struct mgmt *mgmt, uint16_t index,
 	}
 }
 
+static void cmd_debug_keys(struct mgmt *mgmt, uint16_t index,
+						int argc, char **argv)
+{
+	cmd_setting(mgmt, index, MGMT_OP_SET_DEBUG_KEYS, argc, argv);
+}
+
 static struct {
 	char *cmd;
 	void (*func)(struct mgmt *mgmt, uint16_t index, int argc, char **argv);
@@ -1935,7 +2058,9 @@ static struct {
 	{ "pair",	cmd_pair,	"Pair with a remote device"	},
 	{ "cancelpair",	cmd_cancel_pair,"Cancel pairing"		},
 	{ "unpair",	cmd_unpair,	"Unpair device"			},
-	{ "keys",	cmd_keys,	"Load Keys"			},
+	{ "keys",	cmd_keys,	"Load Link Keys"		},
+	{ "ltks",	cmd_ltks,	"Load Long Term Keys"		},
+	{ "irks",	cmd_irks,	"Load Identity Resolving Keys"	},
 	{ "block",	cmd_block,	"Block Device"			},
 	{ "unblock",	cmd_unblock,	"Unblock Device"		},
 	{ "add-uuid",	cmd_add_uuid,	"Add UUID"			},
@@ -1944,6 +2069,7 @@ static struct {
 	{ "local-oob",	cmd_local_oob,	"Local OOB data"		},
 	{ "did",	cmd_did,	"Set Device ID"			},
 	{ "static-addr",cmd_static_addr,"Set static address"		},
+	{ "debug-keys",	cmd_debug_keys,	"Toogle debug keys"		},
 	{ }
 };
 

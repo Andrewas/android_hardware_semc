@@ -58,6 +58,7 @@ struct btdev {
 	uint16_t pin[16];
 	uint8_t pin_len;
 	uint8_t io_cap;
+	uint8_t auth_req;
 	bool ssp_auth_complete;
 	uint8_t ssp_status;
 
@@ -104,6 +105,7 @@ struct btdev {
 	uint8_t  ext_inquiry_fec;
 	uint8_t  ext_inquiry_rsp[240];
 	uint8_t  simple_pairing_mode;
+	uint8_t  ssp_debug_mode;
 	uint8_t  secure_conn_support;
 	uint8_t  le_supported;
 	uint8_t  le_simultaneous;
@@ -979,6 +981,45 @@ static void link_key_req_neg_reply_complete(struct btdev *btdev,
 	}
 }
 
+static uint8_t get_link_key_type(struct btdev *btdev)
+{
+	struct btdev *remote = btdev->conn;
+	uint8_t auth, unauth;
+
+	if (!remote)
+		return 0x00;
+
+	if (!btdev->simple_pairing_mode)
+		return 0x00;
+
+	if (btdev->ssp_debug_mode || remote->ssp_debug_mode)
+		return 0x03;
+
+	if (btdev->secure_conn_support && remote->secure_conn_support) {
+		unauth = 0x04;
+		auth = 0x05;
+	} else {
+		unauth = 0x07;
+		auth = 0x08;
+	}
+
+	if (btdev->io_cap == 0x03 || remote->io_cap == 0x03)
+		return unauth;
+
+	if (!(btdev->auth_req & 0x01) && !(remote->auth_req & 0x01))
+		return unauth;
+
+	/* DisplayOnly only produces authenticated with KeyboardOnly */
+	if (btdev->io_cap == 0x00 && remote->io_cap != 0x02)
+		return unauth;
+
+	/* DisplayOnly only produces authenticated with KeyboardOnly */
+	if (remote->io_cap == 0x00 && btdev->io_cap != 0x02)
+		return unauth;
+
+	return auth;
+}
+
 static void link_key_notify(struct btdev *btdev, const uint8_t *bdaddr,
 							const uint8_t *key)
 {
@@ -988,8 +1029,7 @@ static void link_key_notify(struct btdev *btdev, const uint8_t *bdaddr,
 
 	memcpy(ev.bdaddr, bdaddr, 6);
 	memcpy(ev.link_key, key, 16);
-	/* FIXME: set correct key type */
-	ev.key_type = 0x00;
+	ev.key_type = get_link_key_type(btdev);
 
 	send_event(btdev, BT_HCI_EVT_LINK_KEY_NOTIFY, &ev, sizeof(ev));
 }
@@ -1229,6 +1269,7 @@ static void io_cap_req_reply_complete(struct btdev *btdev,
 	status = BT_HCI_ERR_SUCCESS;
 
 	btdev->io_cap = capability;
+	btdev->auth_req = authentication;
 
 	memcpy(ev.bdaddr, btdev->bdaddr, 6);
 	ev.capability = capability;
@@ -1454,6 +1495,7 @@ static void default_cmd(struct btdev *btdev, uint16_t opcode,
 	const struct bt_hci_cmd_le_set_event_mask *lsem;
 	const struct bt_hci_cmd_le_set_adv_data *lsad;
 	const struct bt_hci_cmd_setup_sync_conn *ssc;
+	const struct bt_hci_cmd_write_ssp_debug_mode *wsdm;
 	const struct bt_hci_cmd_le_set_adv_enable *lsae;
 	const struct bt_hci_cmd_le_set_scan_enable *lsse;
 	const struct bt_hci_cmd_le_start_encrypt *lse;
@@ -2366,6 +2408,15 @@ static void default_cmd(struct btdev *btdev, uint16_t opcode,
 		break;
 
 	case BT_HCI_CMD_ENABLE_DUT_MODE:
+		status = BT_HCI_ERR_SUCCESS;
+		cmd_complete(btdev, opcode, &status, sizeof(status));
+		break;
+
+	case BT_HCI_CMD_WRITE_SSP_DEBUG_MODE:
+		if (btdev->type == BTDEV_TYPE_LE)
+			goto unsupported;
+		wsdm = data;
+		btdev->ssp_debug_mode = wsdm->mode;
 		status = BT_HCI_ERR_SUCCESS;
 		cmd_complete(btdev, opcode, &status, sizeof(status));
 		break;

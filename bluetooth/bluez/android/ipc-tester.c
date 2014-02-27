@@ -2,24 +2,28 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2014  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2013-2014  Intel Corporation. All rights reserved.
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -264,7 +268,7 @@ static void emulator(int pipe, int hci_index)
 	memset(buf, 0, sizeof(buf));
 
 	len = read(fd, buf, sizeof(buf));
-	if (len <= 0 || (strcmp(buf, "ctl.start=bluetoothd")))
+	if (len <= 0 || strcmp(buf, "ctl.start=bluetoothd"))
 		goto failed;
 
 	close(pipe);
@@ -650,6 +654,183 @@ struct hal_hdr enable_bt_service_hdr = {
 	.len = 0,
 };
 
+struct bt_set_adapter_prop_data {
+	struct hal_hdr hdr;
+	struct hal_cmd_set_adapter_prop prop;
+
+	/* data placeholder for hal_cmd_set_adapter_prop.val[0] */
+	uint8_t buf[BLUEZ_HAL_MTU - sizeof(struct hal_hdr) -
+				sizeof(struct hal_cmd_set_adapter_prop)];
+} __attribute__((packed));
+
+#define set_name "new name"
+
+static struct bt_set_adapter_prop_data bt_set_adapter_prop_data_overs = {
+	.hdr.service_id = HAL_SERVICE_ID_BLUETOOTH,
+	.hdr.opcode = HAL_OP_SET_ADAPTER_PROP,
+	.hdr.len = sizeof(struct hal_cmd_set_adapter_prop) +
+						sizeof(set_name),
+
+	.prop.type = HAL_PROP_ADAPTER_NAME,
+	/* declare wrong descriptor length */
+	.prop.len = sizeof(set_name) + 1,
+	/* init prop.val[0] */
+	.buf = set_name,
+};
+
+static struct bt_set_adapter_prop_data bt_set_adapter_prop_data_unders = {
+	.hdr.service_id = HAL_SERVICE_ID_BLUETOOTH,
+	.hdr.opcode = HAL_OP_SET_ADAPTER_PROP,
+	.hdr.len = sizeof(struct hal_cmd_set_adapter_prop) +
+						sizeof(set_name),
+
+	.prop.type = HAL_PROP_ADAPTER_NAME,
+	/* declare wrong descriptor length */
+	.prop.len = sizeof(set_name) - 1,
+	/* init prop.val[0] */
+	.buf = set_name,
+};
+
+struct bt_set_remote_prop_data {
+	struct hal_hdr hdr;
+	struct hal_cmd_set_remote_device_prop prop;
+
+	/* data placeholder for hal_cmd_set_remote_device_prop.val[0] */
+	uint8_t buf[BLUEZ_HAL_MTU - sizeof(struct hal_hdr) -
+				sizeof(struct hal_cmd_set_remote_device_prop)];
+} __attribute__((packed));
+
+static struct bt_set_remote_prop_data bt_set_remote_prop_data_overs = {
+	.hdr.service_id = HAL_SERVICE_ID_BLUETOOTH,
+	.hdr.opcode = HAL_OP_SET_REMOTE_DEVICE_PROP,
+	.hdr.len = sizeof(struct hal_cmd_set_remote_device_prop) +
+						sizeof(set_name),
+
+	.prop.bdaddr = {},
+	.prop.type = HAL_PROP_DEVICE_NAME,
+	/* declare wrong descriptor length */
+	.prop.len = sizeof(set_name) + 1,
+	.buf = set_name,
+};
+
+static struct bt_set_remote_prop_data bt_set_remote_prop_data_unders = {
+	.hdr.service_id = HAL_SERVICE_ID_BLUETOOTH,
+	.hdr.opcode = HAL_OP_SET_REMOTE_DEVICE_PROP,
+	.hdr.len = sizeof(struct hal_cmd_set_remote_device_prop) +
+						sizeof(set_name),
+
+	.prop.bdaddr = {},
+	.prop.type = HAL_PROP_DEVICE_NAME,
+	/* declare wrong descriptor length */
+	.prop.len = sizeof(set_name) - 1,
+	.buf = set_name,
+};
+
+struct hidhost_set_info_data {
+	struct hal_hdr hdr;
+	struct hal_cmd_hidhost_set_info info;
+
+	/* data placeholder for hal_cmd_hidhost_set_info.descr[0] field */
+	uint8_t buf[BLUEZ_HAL_MTU - sizeof(struct hal_hdr) -
+				sizeof(struct hal_cmd_hidhost_set_info)];
+} __attribute__((packed));
+
+#define set_info_data "some descriptor"
+
+static struct hidhost_set_info_data hidhost_set_info_data_overs = {
+	.hdr.service_id = HAL_SERVICE_ID_HIDHOST,
+	.hdr.opcode = HAL_OP_HIDHOST_SET_INFO,
+	.hdr.len = sizeof(struct hal_cmd_hidhost_set_info) +
+							sizeof(set_info_data),
+
+	/* declare wrong descriptor length */
+	.info.descr_len = sizeof(set_info_data) + 1,
+	/* init .info.descr[0] */
+	.buf = set_info_data,
+};
+
+static struct hidhost_set_info_data hidhost_set_info_data_unders = {
+	.hdr.service_id = HAL_SERVICE_ID_HIDHOST,
+	.hdr.opcode = HAL_OP_HIDHOST_SET_INFO,
+	.hdr.len = sizeof(struct hal_cmd_hidhost_set_info) +
+							sizeof(set_info_data),
+
+	/* declare wrong descriptor length */
+	.info.descr_len = sizeof(set_info_data) - 1,
+	/* init .info.descr[0] */
+	.buf = set_info_data,
+};
+
+struct hidhost_set_report_data {
+	struct hal_hdr hdr;
+	struct hal_cmd_hidhost_set_report report;
+
+	/* data placeholder for hal_cmd_hidhost_set_report.data[0] field */
+	uint8_t buf[BLUEZ_HAL_MTU - sizeof(struct hal_hdr) -
+				sizeof(struct hal_cmd_hidhost_set_report)];
+} __attribute__((packed));
+
+#define set_rep_data "1234567890"
+
+static struct hidhost_set_report_data hidhost_set_report_data_overs = {
+	.hdr.service_id = HAL_SERVICE_ID_HIDHOST,
+	.hdr.opcode = HAL_OP_HIDHOST_SET_REPORT,
+	.hdr.len = sizeof(struct hal_cmd_hidhost_set_report) +
+							sizeof(set_rep_data),
+
+	/* declare wrong descriptor length */
+	.report.len = sizeof(set_rep_data) + 1,
+	/* init report.data[0] */
+	.buf = set_rep_data,
+};
+
+static struct hidhost_set_report_data hidhost_set_report_data_unders = {
+	.hdr.service_id = HAL_SERVICE_ID_HIDHOST,
+	.hdr.opcode = HAL_OP_HIDHOST_SET_REPORT,
+	.hdr.len = sizeof(struct hal_cmd_hidhost_set_report) +
+							sizeof(set_rep_data),
+
+	/* declare wrong descriptor length */
+	.report.len = sizeof(set_rep_data) - 1,
+	/* init report.data[0] */
+	.buf = set_rep_data,
+};
+
+struct hidhost_send_data_data {
+	struct hal_hdr hdr;
+	struct hal_cmd_hidhost_send_data hiddata;
+
+	/* data placeholder for hal_cmd_hidhost_send_data.data[0] field */
+	uint8_t buf[BLUEZ_HAL_MTU - sizeof(struct hal_hdr) -
+				sizeof(struct hal_cmd_hidhost_send_data)];
+} __attribute__((packed));
+
+#define send_data_data "1234567890"
+
+static struct hidhost_send_data_data hidhost_send_data_overs = {
+	.hdr.service_id = HAL_SERVICE_ID_HIDHOST,
+	.hdr.opcode = HAL_OP_HIDHOST_SEND_DATA,
+	.hdr.len = sizeof(struct hal_cmd_hidhost_send_data) +
+							sizeof(send_data_data),
+
+	/* declare wrong descriptor length */
+	.hiddata.len = sizeof(send_data_data) + 1,
+	/* init .hiddata.data[0] */
+	.buf = send_data_data,
+};
+
+static struct hidhost_send_data_data hidhost_send_data_unders = {
+	.hdr.service_id = HAL_SERVICE_ID_HIDHOST,
+	.hdr.opcode = HAL_OP_HIDHOST_SEND_DATA,
+	.hdr.len = sizeof(struct hal_cmd_hidhost_send_data) +
+							sizeof(send_data_data),
+
+	/* declare wrong descriptor length */
+	.hiddata.len = sizeof(send_data_data) - 1,
+	/* init .hiddata.data[0] */
+	.buf = send_data_data,
+};
+
 int main(int argc, char *argv[])
 {
 	snprintf(exec_dir, sizeof(exec_dir), "%s", dirname(argv[0]));
@@ -751,6 +932,20 @@ int main(int argc, char *argv[])
 			HAL_OP_SET_ADAPTER_PROP,
 			sizeof(struct hal_cmd_set_adapter_prop), -1,
 			HAL_SERVICE_ID_BLUETOOTH);
+	test_generic("Data size BT Set Adapter Prop Vardata+",
+			ipc_send_tc, setup, teardown,
+			&bt_set_adapter_prop_data_overs,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_set_adapter_prop) +
+				sizeof(set_name)),
+			HAL_SERVICE_ID_BLUETOOTH);
+	test_generic("Data size BT Set Adapter Prop Vardata+",
+			ipc_send_tc, setup, teardown,
+			&bt_set_adapter_prop_data_unders,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_set_adapter_prop) +
+				sizeof(set_name)),
+			HAL_SERVICE_ID_BLUETOOTH);
 	test_datasize_valid("BT Get Remote Props+", HAL_SERVICE_ID_BLUETOOTH,
 			HAL_OP_GET_REMOTE_DEVICE_PROPS,
 			sizeof(struct hal_cmd_get_remote_device_props), 1,
@@ -774,6 +969,20 @@ int main(int argc, char *argv[])
 	test_datasize_valid("BT Set Remote Prop-", HAL_SERVICE_ID_BLUETOOTH,
 			HAL_OP_SET_REMOTE_DEVICE_PROP,
 			sizeof(struct hal_cmd_set_remote_device_prop), -1,
+			HAL_SERVICE_ID_BLUETOOTH);
+	test_generic("Data size BT Set Remote Prop Vardata+",
+			ipc_send_tc, setup, teardown,
+			&bt_set_remote_prop_data_overs,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_set_remote_device_prop) +
+				sizeof(set_name)),
+			HAL_SERVICE_ID_BLUETOOTH);
+	test_generic("Data size BT Set Remote Prop Vardata-",
+			ipc_send_tc, setup, teardown,
+			&bt_set_remote_prop_data_unders,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_set_remote_device_prop) +
+				sizeof(set_name)),
 			HAL_SERVICE_ID_BLUETOOTH);
 	test_datasize_valid("BT Get Remote SV Rec+", HAL_SERVICE_ID_BLUETOOTH,
 			HAL_OP_GET_REMOTE_SERVICE_REC,
@@ -863,6 +1072,188 @@ int main(int argc, char *argv[])
 			HAL_OP_LE_TEST_MODE,
 			sizeof(struct hal_cmd_le_test_mode), -1,
 			HAL_SERVICE_ID_BLUETOOTH);
+
+	/* check for valid data size for SOCK */
+	test_datasize_valid("SOCKET Listen+", HAL_SERVICE_ID_SOCK,
+			HAL_OP_SOCKET_LISTEN,
+			sizeof(struct hal_cmd_socket_listen), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_SOCK);
+	test_datasize_valid("SOCKET Listen-", HAL_SERVICE_ID_SOCK,
+			HAL_OP_SOCKET_LISTEN,
+			sizeof(struct hal_cmd_socket_listen), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_SOCK);
+	test_datasize_valid("SOCKET Connect+", HAL_SERVICE_ID_SOCK,
+			HAL_OP_SOCKET_CONNECT,
+			sizeof(struct hal_cmd_socket_connect), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_SOCK);
+	test_datasize_valid("SOCKET Connect-", HAL_SERVICE_ID_SOCK,
+			HAL_OP_SOCKET_CONNECT,
+			sizeof(struct hal_cmd_socket_connect), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_SOCK);
+
+	/* check for valid data size for HID Host */
+	test_datasize_valid("HIDHOST Connect+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_CONNECT,
+			sizeof(struct hal_cmd_hidhost_connect), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Connect-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_CONNECT,
+			sizeof(struct hal_cmd_hidhost_connect), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Disconnect+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_DISCONNECT,
+			sizeof(struct hal_cmd_hidhost_disconnect), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Disconnect-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_DISCONNECT,
+			sizeof(struct hal_cmd_hidhost_disconnect), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Virt. Unplug+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_VIRTUAL_UNPLUG,
+			sizeof(struct hal_cmd_hidhost_virtual_unplug), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Virt. Unplug-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_VIRTUAL_UNPLUG,
+			sizeof(struct hal_cmd_hidhost_virtual_unplug), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Set Info+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_SET_INFO,
+			sizeof(struct hal_cmd_hidhost_set_info), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Set Info-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_SET_INFO,
+			sizeof(struct hal_cmd_hidhost_set_info), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_generic("Data size HIDHOST Set Info Vardata+",
+			ipc_send_tc, setup, teardown,
+			&hidhost_set_info_data_overs,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_hidhost_set_info) +
+				sizeof(set_info_data)),
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_generic("Data size HIDHOST Set Info Vardata-",
+			ipc_send_tc, setup, teardown,
+			&hidhost_set_info_data_unders,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_hidhost_set_info) +
+				sizeof(set_info_data)),
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Get Protocol+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_GET_PROTOCOL,
+			sizeof(struct hal_cmd_hidhost_get_protocol), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Get Protocol-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_GET_PROTOCOL,
+			sizeof(struct hal_cmd_hidhost_get_protocol), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Set Protocol+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_SET_PROTOCOL,
+			sizeof(struct hal_cmd_hidhost_set_protocol), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Set Protocol-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_SET_PROTOCOL,
+			sizeof(struct hal_cmd_hidhost_set_protocol), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Get Report+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_GET_REPORT,
+			sizeof(struct hal_cmd_hidhost_get_report), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Get Report-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_GET_REPORT,
+			sizeof(struct hal_cmd_hidhost_get_report), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Set Report+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_SET_REPORT,
+			sizeof(struct hal_cmd_hidhost_set_report), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Set Report-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_SET_REPORT,
+			sizeof(struct hal_cmd_hidhost_set_report), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_generic("Data size HIDHOST Set Report Vardata+",
+			ipc_send_tc, setup, teardown,
+			&hidhost_set_report_data_overs,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_hidhost_set_report) +
+				sizeof(set_rep_data)),
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_generic("Data size HIDHOST Set Report Vardata-",
+			ipc_send_tc, setup, teardown,
+			&hidhost_set_report_data_unders,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_hidhost_set_report) +
+				sizeof(set_rep_data)),
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Send Data+", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_SEND_DATA,
+			sizeof(struct hal_cmd_hidhost_send_data), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_datasize_valid("HIDHOST Send Data-", HAL_SERVICE_ID_HIDHOST,
+			HAL_OP_HIDHOST_SEND_DATA,
+			sizeof(struct hal_cmd_hidhost_send_data), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_generic("Data size HIDHOST Send Vardata+",
+			ipc_send_tc, setup, teardown,
+			&hidhost_send_data_overs,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_hidhost_send_data) +
+				sizeof(send_data_data)),
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+	test_generic("Data size HIDHOST Send Vardata-",
+			ipc_send_tc, setup, teardown,
+			&hidhost_send_data_unders,
+			(sizeof(struct hal_hdr) +
+				sizeof(struct hal_cmd_hidhost_send_data) +
+				sizeof(send_data_data)),
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_HIDHOST);
+
+	/* check for valid data size for PAN */
+	test_datasize_valid("PAN Enable+", HAL_SERVICE_ID_PAN,
+			HAL_OP_PAN_ENABLE,
+			sizeof(struct hal_cmd_pan_enable), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_PAN);
+	test_datasize_valid("PAN Enable-", HAL_SERVICE_ID_PAN,
+			HAL_OP_PAN_ENABLE,
+			sizeof(struct hal_cmd_pan_enable), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_PAN);
+	test_datasize_valid("PAN Get Role+", HAL_SERVICE_ID_PAN,
+			HAL_OP_PAN_GET_ROLE,
+			0, 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_PAN);
+	test_datasize_valid("PAN Connect+", HAL_SERVICE_ID_PAN,
+			HAL_OP_PAN_CONNECT,
+			sizeof(struct hal_cmd_pan_connect), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_PAN);
+	test_datasize_valid("PAN Connect-", HAL_SERVICE_ID_PAN,
+			HAL_OP_PAN_CONNECT,
+			sizeof(struct hal_cmd_pan_connect), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_PAN);
+	test_datasize_valid("PAN Disconnect+", HAL_SERVICE_ID_PAN,
+			HAL_OP_PAN_DISCONNECT,
+			sizeof(struct hal_cmd_pan_disconnect), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_PAN);
+	test_datasize_valid("PAN Disconnect-", HAL_SERVICE_ID_PAN,
+			HAL_OP_PAN_DISCONNECT,
+			sizeof(struct hal_cmd_pan_disconnect), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_PAN);
+
+	/* check for valid data size for A2DP */
+	test_datasize_valid("A2DP Connect+", HAL_SERVICE_ID_A2DP,
+			HAL_OP_A2DP_CONNECT,
+			sizeof(struct hal_cmd_a2dp_connect), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_A2DP);
+	test_datasize_valid("A2DP Connect-", HAL_SERVICE_ID_A2DP,
+			HAL_OP_A2DP_CONNECT,
+			sizeof(struct hal_cmd_a2dp_connect), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_A2DP);
+	test_datasize_valid("A2DP Disconnect+", HAL_SERVICE_ID_A2DP,
+			HAL_OP_A2DP_DISCONNECT,
+			sizeof(struct hal_cmd_a2dp_disconnect), 1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_A2DP);
+	test_datasize_valid("A2DP Disconnect-", HAL_SERVICE_ID_A2DP,
+			HAL_OP_A2DP_DISCONNECT,
+			sizeof(struct hal_cmd_a2dp_disconnect), -1,
+			HAL_SERVICE_ID_BLUETOOTH, HAL_SERVICE_ID_A2DP);
 
 	return tester_run();
 }

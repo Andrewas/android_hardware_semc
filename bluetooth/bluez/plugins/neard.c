@@ -25,6 +25,7 @@
 #include <config.h>
 #endif
 
+#include <stdlib.h>
 #include <errno.h>
 #include <gdbus/gdbus.h>
 
@@ -32,14 +33,14 @@
 #include <bluetooth/hci.h>
 #include <bluetooth/sdp.h>
 
-#include "plugin.h"
-#include "log.h"
-#include "dbus-common.h"
-#include "adapter.h"
-#include "device.h"
-#include "eir.h"
-#include "agent.h"
-#include "hcid.h"
+#include "src/plugin.h"
+#include "src/log.h"
+#include "src/dbus-common.h"
+#include "src/adapter.h"
+#include "src/device.h"
+#include "src/eir.h"
+#include "src/agent.h"
+#include "src/hcid.h"
 
 #define NEARD_NAME "org.neard"
 #define NEARD_PATH "/"
@@ -77,7 +78,7 @@ struct oob_params {
 
 static void free_oob_params(struct oob_params *params)
 {
-	g_slist_free_full(params->services, g_free);
+	g_slist_free_full(params->services, free);
 	g_free(params->name);
 	g_free(params->hash);
 	g_free(params->randomizer);
@@ -326,7 +327,7 @@ static int check_device(struct btd_device *device)
 		return -ENOENT;
 
 	/* If already paired */
-	if (device_is_paired(device)) {
+	if (device_is_paired(device, BDADDR_BREDR)) {
 		DBG("already paired");
 		return -EALREADY;
 	}

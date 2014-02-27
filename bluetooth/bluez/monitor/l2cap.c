@@ -2,22 +2,22 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2011-2012  Intel Corporation
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2011-2014  Intel Corporation
+ *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
@@ -39,6 +39,7 @@
 #include "display.h"
 #include "l2cap.h"
 #include "uuid.h"
+#include "keys.h"
 #include "sdp.h"
 
 #define MAX_CHAN 64
@@ -2343,6 +2344,25 @@ static void print_smp_auth_req(uint8_t auth_req)
 			str, (auth_req & 0x04) ? "MITM" : "No MITM", auth_req);
 }
 
+static void print_smp_key_dist(const char *label, uint8_t dist)
+{
+	char str[19];
+
+	if (!(dist & 0x07)) {
+		strcpy(str, "<none> ");
+	} else {
+		str[0] = '\0';
+		if (dist & 0x01)
+			strcat(str, "EncKey ");
+		if (dist & 0x02)
+			strcat(str, "IdKey ");
+		if (dist & 0x04)
+			strcat(str, "Sign ");
+	}
+
+	print_field("%s: %s(0x%2.2x)", label, str, dist);
+}
+
 static void smp_pairing_request(const struct l2cap_frame *frame)
 {
 	const struct bt_l2cap_smp_pairing_request *pdu = frame->data;
@@ -2352,8 +2372,8 @@ static void smp_pairing_request(const struct l2cap_frame *frame)
 	print_smp_auth_req(pdu->auth_req);
 
 	print_field("Max encryption key size: %d", pdu->max_key_size);
-	print_field("Initiator key distribution: 0x%2.2x", pdu->init_key_dist);
-	print_field("Responder key distribution: 0x%2.2x", pdu->resp_key_dist);
+	print_smp_key_dist("Initiator key distribution", pdu->init_key_dist);
+	print_smp_key_dist("Responder key distribution", pdu->resp_key_dist);
 }
 
 static void smp_pairing_response(const struct l2cap_frame *frame)
@@ -2365,8 +2385,8 @@ static void smp_pairing_response(const struct l2cap_frame *frame)
 	print_smp_auth_req(pdu->auth_req);
 
 	print_field("Max encryption key size: %d", pdu->max_key_size);
-	print_field("Initiator key distribution: 0x%2.2x", pdu->init_key_dist);
-	print_field("Responder key distribution: 0x%2.2x", pdu->resp_key_dist);
+	print_smp_key_dist("Initiator key distribution", pdu->init_key_dist);
+	print_smp_key_dist("Responder key distribution", pdu->resp_key_dist);
 }
 
 static void smp_pairing_confirm(const struct l2cap_frame *frame)
@@ -2447,6 +2467,8 @@ static void smp_ident_info(const struct l2cap_frame *frame)
 	const struct bt_l2cap_smp_ident_info *pdu = frame->data;
 
 	print_hex_field("Identity resolving key", pdu->irk, 16);
+
+	keys_update_identity_key(pdu->irk);
 }
 
 static void smp_ident_addr_info(const struct l2cap_frame *frame)
@@ -2455,6 +2477,8 @@ static void smp_ident_addr_info(const struct l2cap_frame *frame)
 
 	print_addr_type(pdu->addr_type);
 	print_addr(pdu->addr, pdu->addr_type);
+
+	keys_update_identity_addr(pdu->addr, pdu->addr_type);
 }
 
 static void smp_signing_info(const struct l2cap_frame *frame)

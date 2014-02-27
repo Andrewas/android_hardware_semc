@@ -2,21 +2,21 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2013-2014  Intel Corporation. All rights reserved.
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
@@ -38,19 +38,21 @@
 #include "lib/sdp.h"
 #include "lib/sdp_lib.h"
 #include "profiles/audio/a2dp-codecs.h"
-#include "log.h"
+#include "src/log.h"
 #include "a2dp.h"
 #include "hal-msg.h"
 #include "ipc.h"
 #include "utils.h"
 #include "bluetooth.h"
 #include "avdtp.h"
+#include "avrcp.h"
 #include "audio-msg.h"
 #include "audio-ipc.h"
 
 #define L2CAP_PSM_AVDTP 0x19
 #define SVC_HINT_CAPTURING 0x08
 #define IDLE_TIMEOUT 1
+#define AUDIO_RETRY_TIMEOUT 2
 
 static GIOChannel *server = NULL;
 static GSList *devices = NULL;
@@ -58,6 +60,8 @@ static GSList *endpoints = NULL;
 static GSList *setups = NULL;
 static bdaddr_t adapter_addr;
 static uint32_t record_id = 0;
+static guint audio_retry_id = 0;
+static bool audio_retrying = false;
 
 struct a2dp_preset {
 	void *data;
@@ -119,8 +123,41 @@ static void unregister_endpoint(void *data)
 	g_free(endpoint);
 }
 
-static void a2dp_device_free(struct a2dp_device *dev)
+static void setup_free(void *data)
 {
+	struct a2dp_setup *setup = data;
+
+	if (!g_slist_find(setup->endpoint->presets, setup->preset))
+		preset_free(setup->preset);
+
+	g_free(setup);
+}
+
+static void setup_remove(struct a2dp_setup *setup)
+{
+	setups = g_slist_remove(setups, setup);
+	setup_free(setup);
+}
+
+static void setup_remove_all_by_dev(struct a2dp_device *dev)
+{
+	GSList *l = setups;
+
+	while (l) {
+		struct a2dp_setup *setup = l->data;
+		GSList *next = g_slist_next(l);
+
+		if (setup->dev == dev)
+			setup_remove(setup);
+
+		l = next;
+	}
+}
+
+static void a2dp_device_free(void *data)
+{
+	struct a2dp_device *dev = data;
+
 	if (dev->idle_id > 0)
 		g_source_remove(dev->idle_id);
 
@@ -132,8 +169,15 @@ static void a2dp_device_free(struct a2dp_device *dev)
 		g_io_channel_unref(dev->io);
 	}
 
-	devices = g_slist_remove(devices, dev);
+	setup_remove_all_by_dev(dev);
+
 	g_free(dev);
+}
+
+static void a2dp_device_remove(struct a2dp_device *dev)
+{
+	devices = g_slist_remove(devices, dev);
+	a2dp_device_free(dev);
 }
 
 static struct a2dp_device *a2dp_device_new(const bdaddr_t *dst)
@@ -188,7 +232,9 @@ static void bt_a2dp_notify_state(struct a2dp_device *dev, uint8_t state)
 	if (state != HAL_A2DP_STATE_DISCONNECTED)
 		return;
 
-	a2dp_device_free(dev);
+	bt_avrcp_disconnect(&dev->dst);
+
+	a2dp_device_remove(dev);
 }
 
 static void bt_audio_notify_state(struct a2dp_setup *setup, uint8_t state)
@@ -506,6 +552,7 @@ static void signaling_connect_cb(GIOChannel *chan, GError *err,
 			error("avdtp_discover: %s", strerror(-perr));
 			goto failed;
 		}
+		bt_avrcp_connect(&dev->dst);
 	} else /* Init idle timeout to discover */
 		dev->idle_id = g_timeout_add_seconds(IDLE_TIMEOUT, idle_timeout,
 									dev);
@@ -537,7 +584,7 @@ static void bt_a2dp_connect(const void *buf, uint16_t len)
 
 	dev = a2dp_device_new(&dst);
 	if (!a2dp_device_connect(dev, signaling_connect_cb)) {
-		a2dp_device_free(dev);
+		a2dp_device_remove(dev);
 		status = HAL_STATUS_FAILED;
 		goto failed;
 	}
@@ -823,22 +870,6 @@ static struct a2dp_device *find_device_by_session(struct avdtp *session)
 	return NULL;
 }
 
-static void setup_free(void *data)
-{
-	struct a2dp_setup *setup = data;
-
-	if (!g_slist_find(setup->endpoint->presets, setup->preset))
-		preset_free(setup->preset);
-
-	g_free(setup);
-}
-
-static void setup_remove(struct a2dp_setup *setup)
-{
-	setups = g_slist_remove(setups, setup);
-	setup_free(setup);
-}
-
 static struct a2dp_setup *find_setup(uint8_t id)
 {
 	GSList *l;
@@ -958,6 +989,8 @@ static gboolean sep_close_ind(struct avdtp *session,
 		*err = AVDTP_SEP_NOT_IN_USE;
 		return FALSE;
 	}
+
+	bt_audio_notify_state(setup, HAL_AUDIO_STOPPED);
 
 	setup_remove(setup);
 
@@ -1132,13 +1165,23 @@ static void sep_close_cfm(struct avdtp *session, struct avdtp_local_sep *sep,
 			void *user_data)
 {
 	struct a2dp_endpoint *endpoint = user_data;
+	struct a2dp_setup *setup;
 
 	DBG("");
 
 	if (err)
 		return;
 
-	setup_remove_by_id(endpoint->id);
+	setup = find_setup(endpoint->id);
+	if (!setup) {
+		error("Unable to find stream setup for %u endpoint",
+								endpoint->id);
+		return;
+	}
+
+	bt_audio_notify_state(setup, HAL_AUDIO_STOPPED);
+
+	setup_remove(setup);
 }
 
 static void sep_abort_cfm(struct avdtp *session, struct avdtp_local_sep *sep,
@@ -1230,6 +1273,8 @@ static void bt_audio_open(const void *buf, uint16_t len)
 
 	DBG("");
 
+	audio_retrying = false;
+
 	if (cmd->presets == 0) {
 		error("No audio presets found");
 		goto failed;
@@ -1286,6 +1331,7 @@ static void bt_audio_close(const void *buf, uint16_t len)
 		return;
 	}
 
+	endpoints = g_slist_remove(endpoints, endpoint);
 	unregister_endpoint(endpoint);
 
 	audio_ipc_send_rsp(AUDIO_OP_CLOSE, AUDIO_STATUS_SUCCESS);
@@ -1297,6 +1343,7 @@ static void bt_stream_open(const void *buf, uint16_t len)
 	struct audio_rsp_open_stream *rsp;
 	struct a2dp_setup *setup;
 	int fd;
+	uint16_t omtu;
 
 	DBG("");
 
@@ -1307,14 +1354,17 @@ static void bt_stream_open(const void *buf, uint16_t len)
 		return;
 	}
 
-	if (!avdtp_stream_get_transport(setup->stream, &fd, NULL, NULL, NULL)) {
+	if (!avdtp_stream_get_transport(setup->stream, &fd, NULL, &omtu,
+								NULL)) {
 		error("avdtp_stream_get_transport: failed");
 		audio_ipc_send_rsp(AUDIO_OP_OPEN_STREAM, AUDIO_STATUS_FAILED);
 		return;
 	}
 
-	len = sizeof(struct audio_preset) + setup->preset->len;
+	len = sizeof(struct audio_rsp_open_stream) +
+			sizeof(struct audio_preset) + setup->preset->len;
 	rsp = g_malloc0(len);
+	rsp->mtu = omtu;
 	rsp->preset->len = setup->preset->len;
 	memcpy(rsp->preset->data, setup->preset->data, setup->preset->len);
 
@@ -1365,10 +1415,12 @@ static void bt_stream_resume(const void *buf, uint16_t len)
 		goto failed;
 	}
 
-	err = avdtp_start(setup->dev->session, setup->stream);
-	if (err < 0) {
-		error("avdtp_start: %s", strerror(-err));
-		goto failed;
+	if (setup->state != HAL_AUDIO_STARTED) {
+		err = avdtp_start(setup->dev->session, setup->stream);
+		if (err < 0) {
+			error("avdtp_start: %s", strerror(-err));
+			goto failed;
+		}
 	}
 
 	audio_ipc_send_rsp(AUDIO_OP_RESUME_STREAM, AUDIO_STATUS_SUCCESS);
@@ -1422,14 +1474,78 @@ static const struct ipc_handler audio_handlers[] = {
 	{ bt_stream_suspend, false, sizeof(struct audio_cmd_suspend_stream) },
 };
 
+static void bt_audio_unregister(void)
+{
+	DBG("");
+
+	if (audio_retry_id > 0)
+		g_source_remove(audio_retry_id);
+
+	g_slist_free_full(endpoints, unregister_endpoint);
+	endpoints = NULL;
+
+	g_slist_free_full(setups, setup_free);
+	setups = NULL;
+
+	audio_ipc_cleanup();
+}
+
+static void bt_audio_register(GDestroyNotify destroy)
+{
+	DBG("");
+
+	audio_ipc_init(destroy);
+
+	audio_ipc_register(audio_handlers, G_N_ELEMENTS(audio_handlers));
+}
+
+static gboolean audio_retry_register(void *data)
+{
+	GDestroyNotify destroy = data;
+
+	audio_retry_id = 0;
+	audio_retrying = true;
+
+	bt_audio_register(destroy);
+
+	return FALSE;
+}
+
+static void audio_disconnected(void *data)
+{
+	GSList *l;
+	bool restart;
+
+	DBG("");
+
+	if (audio_retrying)
+		goto retry;
+
+	restart = endpoints != NULL ? true : false;
+
+	bt_audio_unregister();
+
+	for (l = devices; l; l = g_slist_next(l)) {
+		struct a2dp_device *dev = l->data;
+
+		avdtp_shutdown(dev->session);
+	}
+
+	if (!restart)
+		return;
+
+retry:
+	audio_retry_id = g_timeout_add_seconds(AUDIO_RETRY_TIMEOUT,
+						audio_retry_register,
+						audio_disconnected);
+}
+
 bool bt_a2dp_register(const bdaddr_t *addr)
 {
 	GError *err = NULL;
 	sdp_record_t *rec;
 
 	DBG("");
-
-	audio_ipc_init();
 
 	bacpy(&adapter_addr, addr);
 
@@ -1460,7 +1576,7 @@ bool bt_a2dp_register(const bdaddr_t *addr)
 	ipc_register(HAL_SERVICE_ID_A2DP, cmd_handlers,
 						G_N_ELEMENTS(cmd_handlers));
 
-	audio_ipc_register(audio_handlers, G_N_ELEMENTS(audio_handlers));
+	bt_audio_register(audio_disconnected);
 
 	return true;
 
@@ -1469,13 +1585,6 @@ fail:
 	g_io_channel_unref(server);
 	server = NULL;
 	return false;
-}
-
-static void a2dp_device_disconnected(gpointer data, gpointer user_data)
-{
-	struct a2dp_device *dev = data;
-
-	bt_a2dp_notify_state(dev, HAL_A2DP_STATE_DISCONNECTED);
 }
 
 void bt_a2dp_unregister(void)
@@ -1488,7 +1597,7 @@ void bt_a2dp_unregister(void)
 	g_slist_free_full(endpoints, unregister_endpoint);
 	endpoints = NULL;
 
-	g_slist_foreach(devices, a2dp_device_disconnected, NULL);
+	g_slist_free_full(devices, a2dp_device_free);
 	devices = NULL;
 
 	ipc_unregister(HAL_SERVICE_ID_A2DP);

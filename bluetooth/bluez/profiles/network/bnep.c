@@ -39,13 +39,14 @@
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/l2cap.h>
 #include <bluetooth/bnep.h>
-#include <btio/btio.h>
 
 #include <glib.h>
 
-#include "log.h"
-#include "bnep.h"
+#include "src/log.h"
 #include "lib/uuid.h"
+#include "btio/btio.h"
+
+#include "bnep.h"
 
 #define CON_SETUP_RETRIES      3
 #define CON_SETUP_TO           9
@@ -173,9 +174,10 @@ static int bnep_connadd(int sk, uint16_t role, char *dev)
 {
 	struct bnep_connadd_req req;
 
-	memset(dev, 0, 16);
 	memset(&req, 0, sizeof(req));
-	strcpy(req.device, "bnep%d");
+	strncpy(req.device, dev, 16);
+	req.device[15] = '\0';
+
 	req.sock = sk;
 	req.role = role;
 	if (ioctl(ctl, BNEPCONNADD, &req) < 0) {
@@ -384,7 +386,8 @@ static gboolean bnep_conn_req_to(gpointer user_data)
 	return FALSE;
 }
 
-struct bnep *bnep_new(int sk, uint16_t local_role, uint16_t remote_role)
+struct bnep *bnep_new(int sk, uint16_t local_role, uint16_t remote_role,
+								char *iface)
 {
 	struct bnep *session;
 	int dup_fd;
@@ -397,6 +400,8 @@ struct bnep *bnep_new(int sk, uint16_t local_role, uint16_t remote_role)
 	session->io = g_io_channel_unix_new(dup_fd);
 	session->src = local_role;
 	session->dst = remote_role;
+	strncpy(session->iface, iface, 16);
+	session->iface[15] = '\0';
 
 	g_io_channel_set_close_on_unref(session->io, TRUE);
 	session->watch = g_io_add_watch(session->io,
@@ -518,12 +523,14 @@ static int bnep_add_to_bridge(const char *devname, const char *bridge)
 
 static int bnep_del_from_bridge(const char *devname, const char *bridge)
 {
-	int ifindex = if_nametoindex(devname);
+	int ifindex;
 	struct ifreq ifr;
 	int sk, err;
 
 	if (!devname || !bridge)
 		return -EINVAL;
+
+	ifindex = if_nametoindex(devname);
 
 	sk = socket(AF_INET, SOCK_STREAM, 0);
 	if (sk < 0)

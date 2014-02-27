@@ -58,14 +58,15 @@ struct test_data {
 struct l2cap_data {
 	uint16_t client_psm;
 	uint16_t server_psm;
+	uint16_t cid;
 	int expect_err;
 
-	uint8_t send_req_code;
-	const void *send_req;
-	uint16_t send_req_len;
-	uint8_t expect_rsp_code;
-	const void *expect_rsp;
-	uint16_t expect_rsp_len;
+	uint8_t send_cmd_code;
+	const void *send_cmd;
+	uint16_t send_cmd_len;
+	uint8_t expect_cmd_code;
+	const void *expect_cmd;
+	uint16_t expect_cmd_len;
 
 	uint16_t data_len;
 	const void *read_data;
@@ -322,28 +323,28 @@ static const uint8_t l2cap_connect_req[] = { 0x01, 0x10, 0x41, 0x00 };
 
 static const struct l2cap_data l2cap_server_success_test = {
 	.server_psm = 0x1001,
-	.send_req_code = BT_L2CAP_PDU_CONN_REQ,
-	.send_req = l2cap_connect_req,
-	.send_req_len = sizeof(l2cap_connect_req),
-	.expect_rsp_code = BT_L2CAP_PDU_CONN_RSP,
+	.send_cmd_code = BT_L2CAP_PDU_CONN_REQ,
+	.send_cmd = l2cap_connect_req,
+	.send_cmd_len = sizeof(l2cap_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_CONN_RSP,
 };
 
 static const struct l2cap_data l2cap_server_read_success_test = {
 	.server_psm = 0x1001,
-	.send_req_code = BT_L2CAP_PDU_CONN_REQ,
-	.send_req = l2cap_connect_req,
-	.send_req_len = sizeof(l2cap_connect_req),
-	.expect_rsp_code = BT_L2CAP_PDU_CONN_RSP,
+	.send_cmd_code = BT_L2CAP_PDU_CONN_REQ,
+	.send_cmd = l2cap_connect_req,
+	.send_cmd_len = sizeof(l2cap_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_CONN_RSP,
 	.read_data = l2_data,
 	.data_len = sizeof(l2_data),
 };
 
 static const struct l2cap_data l2cap_server_write_success_test = {
 	.server_psm = 0x1001,
-	.send_req_code = BT_L2CAP_PDU_CONN_REQ,
-	.send_req = l2cap_connect_req,
-	.send_req_len = sizeof(l2cap_connect_req),
-	.expect_rsp_code = BT_L2CAP_PDU_CONN_RSP,
+	.send_cmd_code = BT_L2CAP_PDU_CONN_REQ,
+	.send_cmd = l2cap_connect_req,
+	.send_cmd_len = sizeof(l2cap_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_CONN_RSP,
 	.write_data = l2_data,
 	.data_len = sizeof(l2_data),
 };
@@ -356,12 +357,12 @@ static const uint8_t l2cap_sec_block_rsp[] = {	0x00, 0x00,	/* dcid */
 
 static const struct l2cap_data l2cap_server_sec_block_test = {
 	.server_psm = 0x1001,
-	.send_req_code = BT_L2CAP_PDU_CONN_REQ,
-	.send_req = l2cap_connect_req,
-	.send_req_len = sizeof(l2cap_connect_req),
-	.expect_rsp_code = BT_L2CAP_PDU_CONN_RSP,
-	.expect_rsp = l2cap_sec_block_rsp,
-	.expect_rsp_len = sizeof(l2cap_sec_block_rsp),
+	.send_cmd_code = BT_L2CAP_PDU_CONN_REQ,
+	.send_cmd = l2cap_connect_req,
+	.send_cmd_len = sizeof(l2cap_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_CONN_RSP,
+	.expect_cmd = l2cap_sec_block_rsp,
+	.expect_cmd_len = sizeof(l2cap_sec_block_rsp),
 	.enable_ssp = true,
 };
 
@@ -372,24 +373,24 @@ static const uint8_t l2cap_nval_psm_rsp[] = {	0x00, 0x00,	/* dcid */
 					};
 
 static const struct l2cap_data l2cap_server_nval_psm_test = {
-	.send_req_code = BT_L2CAP_PDU_CONN_REQ,
-	.send_req = l2cap_connect_req,
-	.send_req_len = sizeof(l2cap_connect_req),
-	.expect_rsp_code = BT_L2CAP_PDU_CONN_RSP,
-	.expect_rsp = l2cap_nval_psm_rsp,
-	.expect_rsp_len = sizeof(l2cap_nval_psm_rsp),
+	.send_cmd_code = BT_L2CAP_PDU_CONN_REQ,
+	.send_cmd = l2cap_connect_req,
+	.send_cmd_len = sizeof(l2cap_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_CONN_RSP,
+	.expect_cmd = l2cap_nval_psm_rsp,
+	.expect_cmd_len = sizeof(l2cap_nval_psm_rsp),
 };
 
 static const uint8_t l2cap_nval_conn_req[] = { 0x00 };
 static const uint8_t l2cap_nval_pdu_rsp[] = { 0x00, 0x00 };
 
 static const struct l2cap_data l2cap_server_nval_pdu_test1 = {
-	.send_req_code = BT_L2CAP_PDU_CONN_REQ,
-	.send_req = l2cap_nval_conn_req,
-	.send_req_len = sizeof(l2cap_nval_conn_req),
-	.expect_rsp_code = BT_L2CAP_PDU_CMD_REJECT,
-	.expect_rsp = l2cap_nval_pdu_rsp,
-	.expect_rsp_len = sizeof(l2cap_nval_pdu_rsp),
+	.send_cmd_code = BT_L2CAP_PDU_CONN_REQ,
+	.send_cmd = l2cap_nval_conn_req,
+	.send_cmd_len = sizeof(l2cap_nval_conn_req),
+	.expect_cmd_code = BT_L2CAP_PDU_CMD_REJECT,
+	.expect_cmd = l2cap_nval_pdu_rsp,
+	.expect_cmd_len = sizeof(l2cap_nval_pdu_rsp),
 };
 
 static const uint8_t l2cap_nval_dc_req[] = { 0x12, 0x34, 0x56, 0x78 };
@@ -397,12 +398,12 @@ static const uint8_t l2cap_nval_cid_rsp[] = { 0x02, 0x00,
 						0x12, 0x34, 0x56, 0x78 };
 
 static const struct l2cap_data l2cap_server_nval_cid_test1 = {
-	.send_req_code = BT_L2CAP_PDU_DISCONN_REQ,
-	.send_req = l2cap_nval_dc_req,
-	.send_req_len = sizeof(l2cap_nval_dc_req),
-	.expect_rsp_code = BT_L2CAP_PDU_CMD_REJECT,
-	.expect_rsp = l2cap_nval_cid_rsp,
-	.expect_rsp_len = sizeof(l2cap_nval_cid_rsp),
+	.send_cmd_code = BT_L2CAP_PDU_DISCONN_REQ,
+	.send_cmd = l2cap_nval_dc_req,
+	.send_cmd_len = sizeof(l2cap_nval_dc_req),
+	.expect_cmd_code = BT_L2CAP_PDU_CMD_REJECT,
+	.expect_cmd = l2cap_nval_cid_rsp,
+	.expect_cmd_len = sizeof(l2cap_nval_cid_rsp),
 };
 
 static const uint8_t l2cap_nval_cfg_req[] = { 0x12, 0x34, 0x00, 0x00 };
@@ -410,12 +411,12 @@ static const uint8_t l2cap_nval_cfg_rsp[] = { 0x02, 0x00,
 						0x12, 0x34, 0x00, 0x00 };
 
 static const struct l2cap_data l2cap_server_nval_cid_test2 = {
-	.send_req_code = BT_L2CAP_PDU_CONFIG_REQ,
-	.send_req = l2cap_nval_cfg_req,
-	.send_req_len = sizeof(l2cap_nval_cfg_req),
-	.expect_rsp_code = BT_L2CAP_PDU_CMD_REJECT,
-	.expect_rsp = l2cap_nval_cfg_rsp,
-	.expect_rsp_len = sizeof(l2cap_nval_cfg_rsp),
+	.send_cmd_code = BT_L2CAP_PDU_CONFIG_REQ,
+	.send_cmd = l2cap_nval_cfg_req,
+	.send_cmd_len = sizeof(l2cap_nval_cfg_req),
+	.expect_cmd_code = BT_L2CAP_PDU_CMD_REJECT,
+	.expect_cmd = l2cap_nval_cfg_rsp,
+	.expect_cmd_len = sizeof(l2cap_nval_cfg_rsp),
 };
 
 static const struct l2cap_data le_client_connect_success_test_1 = {
@@ -427,6 +428,15 @@ static const struct l2cap_data le_client_connect_success_test_2 = {
 	.client_psm = 0x0080,
 	.server_psm = 0x0080,
 	.sec_level  = BT_SECURITY_MEDIUM,
+};
+
+static const uint8_t cmd_reject_rsp[] = { 0x01, 0x01, 0x02, 0x00, 0x00, 0x00 };
+
+static const struct l2cap_data le_client_connect_reject_test_1 = {
+	.client_psm = 0x0080,
+	.send_cmd = cmd_reject_rsp,
+	.send_cmd_len = sizeof(cmd_reject_rsp),
+	.expect_err = ECONNREFUSED,
 };
 
 static const struct l2cap_data le_client_connect_nval_psm_test = {
@@ -443,10 +453,19 @@ static const uint8_t le_connect_req[] = {	0x80, 0x00, /* PSM */
 
 static const struct l2cap_data le_server_success_test = {
 	.server_psm = 0x0080,
-	.send_req_code = BT_L2CAP_PDU_LE_CONN_REQ,
-	.send_req = le_connect_req,
-	.send_req_len = sizeof(le_connect_req),
-	.expect_rsp_code = BT_L2CAP_PDU_LE_CONN_RSP,
+	.send_cmd_code = BT_L2CAP_PDU_LE_CONN_REQ,
+	.send_cmd = le_connect_req,
+	.send_cmd_len = sizeof(le_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_LE_CONN_RSP,
+};
+
+static const struct l2cap_data le_att_client_connect_success_test_1 = {
+	.cid = 0x0004,
+	.sec_level = BT_SECURITY_LOW,
+};
+
+static const struct l2cap_data le_att_server_success_test_1 = {
+	.cid = 0x0004,
 };
 
 static void client_cmd_complete(uint16_t opcode, uint8_t status,
@@ -592,6 +611,50 @@ static void pin_code_request_callback(uint16_t index, uint16_t length,
 			sizeof(cp), &cp, NULL, NULL, NULL);
 }
 
+static void bthost_send_rsp(const void *buf, uint16_t len, void *user_data)
+{
+	struct test_data *data = tester_get_data();
+	const struct l2cap_data *l2data = data->test_data;
+	struct bthost *bthost;
+
+	if (l2data->expect_cmd_len && len != l2data->expect_cmd_len) {
+		tester_test_failed();
+		return;
+	}
+
+	if (l2data->expect_cmd && memcmp(buf, l2data->expect_cmd,
+						l2data->expect_cmd_len)) {
+		tester_test_failed();
+		return;
+	}
+
+	if (!l2data->send_cmd)
+		return;
+
+	bthost = hciemu_client_get_host(data->hciemu);
+	bthost_send_cid(bthost, data->handle, data->dcid,
+				l2data->send_cmd, l2data->send_cmd_len);
+}
+
+static void send_rsp_new_conn(uint16_t handle, void *user_data)
+{
+	struct test_data *data = user_data;
+	struct bthost *bthost;
+
+	tester_print("New connection with handle 0x%04x", handle);
+
+	data->handle = handle;
+
+	if (data->hciemu_type == HCIEMU_TYPE_LE)
+		data->dcid = 0x0005;
+	else
+		data->dcid = 0x0001;
+
+	bthost = hciemu_client_get_host(data->hciemu);
+	bthost_add_cid_hook(bthost, data->handle, data->dcid,
+						bthost_send_rsp, NULL);
+}
+
 static void setup_powered_common(void)
 {
 	struct test_data *data = tester_get_data();
@@ -629,11 +692,17 @@ static void setup_powered_common(void)
 static void setup_powered_client(const void *test_data)
 {
 	struct test_data *data = tester_get_data();
+	const struct l2cap_data *test = data->test_data;
 	unsigned char param[] = { 0x01 };
 
 	setup_powered_common();
 
 	tester_print("Powering on controller");
+
+	if (test && (test->expect_cmd || test->send_cmd)) {
+		struct bthost *bthost = hciemu_client_get_host(data->hciemu);
+		bthost_set_connect_cb(bthost, send_rsp_new_conn, data);
+	}
 
 	mgmt_send(data->mgmt, MGMT_OP_SET_POWERED, data->mgmt_index,
 			sizeof(param), param, setup_powered_client_callback,
@@ -759,6 +828,48 @@ static void server_bthost_received_data(const void *buf, uint16_t len,
 		tester_test_passed();
 }
 
+static bool check_mtu(struct test_data *data, int sk)
+{
+	const struct l2cap_data *l2data = data->test_data;
+	struct l2cap_options l2o;
+	socklen_t len;
+
+	memset(&l2o, 0, sizeof(l2o));
+
+	if (data->hciemu_type == HCIEMU_TYPE_LE &&
+				(l2data->client_psm || l2data->server_psm)) {
+		/* LE CoC enabled kernels should support BT_RCVMTU and
+		 * BT_SNDMTU.
+		 */
+		len = sizeof(l2o.imtu);
+		if (getsockopt(sk, SOL_BLUETOOTH, BT_RCVMTU,
+							&l2o.imtu, &len) < 0) {
+			tester_warn("getsockopt(BT_RCVMTU): %s (%d)",
+					strerror(errno), errno);
+			return false;
+		}
+
+		len = sizeof(l2o.omtu);
+		if (getsockopt(sk, SOL_BLUETOOTH, BT_SNDMTU,
+							&l2o.omtu, &len) < 0) {
+			tester_warn("getsockopt(BT_SNDMTU): %s (%d)",
+					strerror(errno), errno);
+			return false;
+		}
+	} else {
+		/* For non-LE CoC enabled kernels we need to fall back to
+		 * L2CAP_OPTIONS, so test support for it as well */
+		len = sizeof(l2o);
+		if (getsockopt(sk, SOL_L2CAP, L2CAP_OPTIONS, &l2o, &len) < 0) {
+			 tester_warn("getsockopt(L2CAP_OPTIONS): %s (%d)",
+						strerror(errno), errno);
+			 return false;
+		 }
+	}
+
+	return true;
+}
+
 static gboolean l2cap_connect_cb(GIOChannel *io, GIOCondition cond,
 							gpointer user_data)
 {
@@ -776,10 +887,17 @@ static gboolean l2cap_connect_cb(GIOChannel *io, GIOCondition cond,
 	else
 		err = -sk_err;
 
-	if (err < 0)
+	if (err < 0) {
 		tester_warn("Connect failed: %s (%d)", strerror(-err), -err);
-	else
-		tester_print("Successfully connected");
+		goto failed;
+	}
+
+	tester_print("Successfully connected");
+
+	if (!check_mtu(data, sk)) {
+		tester_test_failed();
+		return FALSE;
+	}
 
 	if (l2data->read_data) {
 		struct bthost *bthost;
@@ -808,6 +926,7 @@ static gboolean l2cap_connect_cb(GIOChannel *io, GIOCondition cond,
 		return FALSE;
 	}
 
+failed:
 	if (-err != l2data->expect_err)
 		tester_test_failed();
 	else
@@ -817,7 +936,7 @@ static gboolean l2cap_connect_cb(GIOChannel *io, GIOCondition cond,
 }
 
 static int create_l2cap_sock(struct test_data *data, uint16_t psm,
-								int sec_level)
+						uint16_t cid, int sec_level)
 {
 	const uint8_t *master_bdaddr;
 	struct sockaddr_l2 addr;
@@ -842,6 +961,7 @@ static int create_l2cap_sock(struct test_data *data, uint16_t psm,
 	memset(&addr, 0, sizeof(addr));
 	addr.l2_family = AF_BLUETOOTH;
 	addr.l2_psm = htobs(psm);
+	addr.l2_cid = htobs(cid);
 	bacpy(&addr.l2_bdaddr, (void *) master_bdaddr);
 	if (data->hciemu_type == HCIEMU_TYPE_LE)
 		addr.l2_bdaddr_type = BDADDR_LE_PUBLIC;
@@ -865,7 +985,7 @@ static int create_l2cap_sock(struct test_data *data, uint16_t psm,
 		if (setsockopt(sk, SOL_BLUETOOTH, BT_SECURITY, &sec,
 							sizeof(sec)) < 0) {
 			err = -errno;
-			tester_warn("Can't bind socket: %s (%d)",
+			tester_warn("Can't set security level: %s (%d)",
 						strerror(errno), errno);
 			close(sk);
 			return err;
@@ -875,7 +995,8 @@ static int create_l2cap_sock(struct test_data *data, uint16_t psm,
 	return sk;
 }
 
-static int connect_l2cap_sock(struct test_data *data, int sk, uint16_t psm)
+static int connect_l2cap_sock(struct test_data *data, int sk, uint16_t psm,
+								uint16_t cid)
 {
 	const uint8_t *client_bdaddr;
 	struct sockaddr_l2 addr;
@@ -891,6 +1012,7 @@ static int connect_l2cap_sock(struct test_data *data, int sk, uint16_t psm)
 	addr.l2_family = AF_BLUETOOTH;
 	bacpy(&addr.l2_bdaddr, (void *) client_bdaddr);
 	addr.l2_psm = htobs(psm);
+	addr.l2_cid = htobs(cid);
 	if (data->hciemu_type == HCIEMU_TYPE_LE)
 		addr.l2_bdaddr_type = BDADDR_LE_PUBLIC;
 	else
@@ -934,13 +1056,14 @@ static void test_connect(const void *test_data)
 						client_l2cap_connect_cb, data);
 	}
 
-	sk = create_l2cap_sock(data, 0, l2data->sec_level);
+	sk = create_l2cap_sock(data, 0, l2data->cid, l2data->sec_level);
 	if (sk < 0) {
 		tester_test_failed();
 		return;
 	}
 
-	if (connect_l2cap_sock(data, sk, l2data->client_psm) < 0) {
+	if (connect_l2cap_sock(data, sk, l2data->client_psm,
+							l2data->cid) < 0) {
 		close(sk);
 		tester_test_failed();
 		return;
@@ -970,6 +1093,11 @@ static gboolean l2cap_listen_cb(GIOChannel *io, GIOCondition cond,
 	new_sk = accept(sk, NULL, NULL);
 	if (new_sk < 0) {
 		tester_warn("accept failed: %s (%u)", strerror(errno), errno);
+		tester_test_failed();
+		return FALSE;
+	}
+
+	if (!check_mtu(data, new_sk)) {
 		tester_test_failed();
 		return FALSE;
 	}
@@ -1025,9 +1153,9 @@ static void client_l2cap_rsp(uint8_t code, const void *data, uint16_t len,
 
 	tester_print("Client received response code 0x%02x", code);
 
-	if (code != l2data->expect_rsp_code) {
+	if (code != l2data->expect_cmd_code) {
 		tester_warn("Unexpected L2CAP response code (expected 0x%02x)",
-						l2data->expect_rsp_code);
+						l2data->expect_cmd_code);
 		goto failed;
 	}
 
@@ -1044,18 +1172,18 @@ static void client_l2cap_rsp(uint8_t code, const void *data, uint16_t len,
 			return;
 	}
 
-	if (!l2data->expect_rsp) {
+	if (!l2data->expect_cmd) {
 		tester_test_passed();
 		return;
 	}
 
-	if (l2data->expect_rsp_len != len) {
+	if (l2data->expect_cmd_len != len) {
 		tester_warn("Unexpected L2CAP response length (%u != %u)",
-						len, l2data->expect_rsp_len);
+						len, l2data->expect_cmd_len);
 		goto failed;
 	}
 
-	if (memcmp(l2data->expect_rsp, data, len) != 0) {
+	if (memcmp(l2data->expect_cmd, data, len) != 0) {
 		tester_warn("Unexpected L2CAP response");
 		goto failed;
 	}
@@ -1067,7 +1195,7 @@ failed:
 	tester_test_failed();
 }
 
-static void client_new_conn(uint16_t handle, void *user_data)
+static void send_req_new_conn(uint16_t handle, void *user_data)
 {
 	struct test_data *data = user_data;
 	const struct l2cap_data *l2data = data->test_data;
@@ -1077,10 +1205,10 @@ static void client_new_conn(uint16_t handle, void *user_data)
 
 	data->handle = handle;
 
-	if (l2data->send_req) {
+	if (l2data->send_cmd) {
 		bthost_l2cap_rsp_cb cb;
 
-		if (l2data->expect_rsp_code)
+		if (l2data->expect_cmd_code)
 			cb = client_l2cap_rsp;
 		else
 			cb = NULL;
@@ -1088,8 +1216,8 @@ static void client_new_conn(uint16_t handle, void *user_data)
 		tester_print("Sending L2CAP Request from client");
 
 		bthost = hciemu_client_get_host(data->hciemu);
-		bthost_l2cap_req(bthost, handle, l2data->send_req_code,
-					l2data->send_req, l2data->send_req_len,
+		bthost_l2cap_req(bthost, handle, l2data->send_cmd_code,
+					l2data->send_cmd, l2data->send_cmd_len,
 					cb, data);
 	}
 }
@@ -1104,9 +1232,9 @@ static void test_server(const void *test_data)
 	GIOChannel *io;
 	int sk;
 
-	if (l2data->server_psm) {
+	if (l2data->server_psm || l2data->cid) {
 		sk = create_l2cap_sock(data, l2data->server_psm,
-							l2data->sec_level);
+					l2data->cid, l2data->sec_level);
 		if (sk < 0) {
 			tester_test_failed();
 			return;
@@ -1138,7 +1266,7 @@ static void test_server(const void *test_data)
 	}
 
 	bthost = hciemu_client_get_host(data->hciemu);
-	bthost_set_connect_cb(bthost, client_new_conn, data);
+	bthost_set_connect_cb(bthost, send_req_new_conn, data);
 
 	if (data->hciemu_type == HCIEMU_TYPE_BREDR)
 		addr_type = BDADDR_BREDR;
@@ -1148,12 +1276,48 @@ static void test_server(const void *test_data)
 	bthost_hci_connect(bthost, master_bdaddr, addr_type);
 }
 
+static void test_getpeername_not_connected(const void *test_data)
+{
+	struct test_data *data = tester_get_data();
+	struct sockaddr_l2 addr;
+	socklen_t len;
+	int sk;
+
+	sk = create_l2cap_sock(data, 0, 0, 0);
+	if (sk < 0) {
+		tester_test_failed();
+		return;
+	}
+
+	len = sizeof(addr);
+	if (getpeername(sk, (struct sockaddr *) &addr, &len) == 0) {
+		tester_warn("getpeername succeeded on non-connected socket");
+		tester_test_failed();
+		goto done;
+	}
+
+	if (errno != ENOTCONN) {
+		tester_warn("Unexpexted getpeername error: %s (%d)",
+						strerror(errno), errno);
+		tester_test_failed();
+		goto done;
+	}
+
+	tester_test_passed();
+
+done:
+	close(sk);
+}
+
 int main(int argc, char *argv[])
 {
 	tester_init(&argc, &argv);
 
 	test_l2cap_bredr("Basic L2CAP Socket - Success", NULL,
 					setup_powered_client, test_basic);
+	test_l2cap_bredr("Non-connected getpeername - Failure", NULL,
+					setup_powered_client,
+					test_getpeername_not_connected);
 
 	test_l2cap_bredr("L2CAP BR/EDR Client - Success",
 					&client_connect_success_test,
@@ -1224,11 +1388,22 @@ int main(int argc, char *argv[])
 	test_l2cap_le("L2CAP LE Client SMP - Success",
 				&le_client_connect_success_test_2,
 				setup_powered_client, test_connect);
+	test_l2cap_le("L2CAP LE Client - Command Reject",
+					&le_client_connect_reject_test_1,
+					setup_powered_client, test_connect);
 	test_l2cap_le("L2CAP LE Client - Invalid PSM",
 					&le_client_connect_nval_psm_test,
 					setup_powered_client, test_connect);
 	test_l2cap_le("L2CAP LE Server - Success", &le_server_success_test,
 					setup_powered_server, test_server);
+
+
+	test_l2cap_le("L2CAP LE ATT Client - Success",
+				&le_att_client_connect_success_test_1,
+				setup_powered_client, test_connect);
+	test_l2cap_le("L2CAP LE ATT Server - Success",
+				&le_att_server_success_test_1,
+				setup_powered_server, test_server);
 
 	return tester_run();
 }

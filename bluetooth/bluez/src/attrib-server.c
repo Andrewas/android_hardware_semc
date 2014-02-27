@@ -38,10 +38,11 @@
 #include <bluetooth/sdp.h>
 #include <bluetooth/sdp_lib.h>
 
-#include "lib/uuid.h"
 #include <gdbus/gdbus.h>
+
+#include "lib/uuid.h"
+#include "btio/btio.h"
 #include "log.h"
-#include <btio/btio.h>
 #include "sdpd.h"
 #include "hcid.h"
 #include "adapter.h"
@@ -50,6 +51,7 @@
 #include "attrib/att.h"
 #include "attrib/gatt.h"
 #include "attrib/att-database.h"
+#include "textfile.h"
 #include "storage.h"
 
 #include "attrib-server.h"
@@ -985,6 +987,12 @@ static void channel_handler(const uint8_t *ipdu, uint16_t len,
 
 	DBG("op 0x%02x", ipdu[0]);
 
+	if (len > vlen) {
+		error("Too much data on ATT socket");
+		status = ATT_ECODE_INVALID_PDU;
+		goto done;
+	}
+
 	switch (ipdu[0]) {
 	case ATT_OP_READ_BY_GROUP_REQ:
 		length = dec_read_by_grp_req(ipdu, len, &start, &end, &uuid);
@@ -1107,6 +1115,7 @@ guint attrib_channel_attach(GAttrib *attrib)
 	struct gatt_channel *channel;
 	GIOChannel *io;
 	GError *gerr = NULL;
+	uint8_t bdaddr_type;
 	uint16_t cid;
 	guint mtu = 0;
 
@@ -1117,6 +1126,7 @@ guint attrib_channel_attach(GAttrib *attrib)
 	bt_io_get(io, &gerr,
 			BT_IO_OPT_SOURCE_BDADDR, &channel->src,
 			BT_IO_OPT_DEST_BDADDR, &channel->dst,
+			BT_IO_OPT_DEST_TYPE, &bdaddr_type,
 			BT_IO_OPT_CID, &cid,
 			BT_IO_OPT_IMTU, &mtu,
 			BT_IO_OPT_INVALID);
@@ -1146,7 +1156,7 @@ guint attrib_channel_attach(GAttrib *attrib)
 		return 0;
 	}
 
-	if (device_is_bonded(device) == FALSE) {
+	if (!device_is_bonded(device, bdaddr_type)) {
 		char *filename;
 
 		filename = btd_device_get_storage_path(device, "ccc");
@@ -1234,6 +1244,9 @@ static void connect_event(GIOChannel *io, GError *gerr, void *user_data)
 	}
 
 	attrib = g_attrib_new(io);
+	if (!attrib)
+		return;
+
 	attrib_channel_attach(attrib);
 	g_attrib_unref(attrib);
 }

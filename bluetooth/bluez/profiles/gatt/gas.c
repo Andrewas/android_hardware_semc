@@ -32,20 +32,20 @@
 #include <errno.h>
 
 #include <glib.h>
-#include <btio/btio.h>
 
+#include "btio/btio.h"
 #include "lib/uuid.h"
-#include "plugin.h"
-#include "adapter.h"
-#include "device.h"
-#include "profile.h"
-#include "service.h"
+#include "src/plugin.h"
+#include "src/adapter.h"
+#include "src/device.h"
+#include "src/profile.h"
+#include "src/service.h"
 #include "attrib/att.h"
 #include "attrib/gattrib.h"
-#include "attio.h"
+#include "src/attio.h"
 #include "attrib/gatt.h"
-#include "log.h"
-#include "textfile.h"
+#include "src/log.h"
+#include "src/textfile.h"
 
 /* Generic Attribute/Access Service */
 struct gas {
@@ -177,6 +177,7 @@ done:
 
 static void indication_cb(const uint8_t *pdu, uint16_t len, gpointer user_data)
 {
+	uint8_t bdaddr_type;
 	struct gas *gas = user_data;
 	uint16_t start, end, olen;
 	size_t plen;
@@ -197,7 +198,8 @@ static void indication_cb(const uint8_t *pdu, uint16_t len, gpointer user_data)
 	olen = enc_confirmation(opdu, plen);
 	g_attrib_send(gas->attrib, 0, opdu, olen, NULL, NULL, NULL);
 
-	if (device_is_bonded(gas->device) == FALSE) {
+	bdaddr_type = btd_device_get_bdaddr_type(gas->device);
+	if (!device_is_bonded(gas->device, bdaddr_type)) {
 		DBG("Ignoring Service Changed: device is not bonded");
 		return;
 	}

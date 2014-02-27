@@ -51,18 +51,25 @@ struct test_data {
 	enum hciemu_type hciemu_type;
 	const void *test_data;
 	unsigned int io_id;
+	uint16_t conn_handle;
 };
 
 struct rfcomm_client_data {
 	uint8_t server_channel;
 	uint8_t client_channel;
 	int expected_connect_err;
+	const uint8_t *send_data;
+	const uint8_t *read_data;
+	uint16_t data_len;
 };
 
 struct rfcomm_server_data {
 	uint8_t server_channel;
 	uint8_t client_channel;
 	bool expected_status;
+	const uint8_t *send_data;
+	const uint8_t *read_data;
+	uint16_t data_len;
 };
 
 static void mgmt_debug(const char *str, void *user_data)
@@ -294,6 +301,22 @@ const struct rfcomm_client_data connect_success = {
 	.client_channel = 0x0c
 };
 
+const uint8_t data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+
+const struct rfcomm_client_data connect_send_success = {
+	.server_channel = 0x0c,
+	.client_channel = 0x0c,
+	.data_len = sizeof(data),
+	.send_data = data
+};
+
+const struct rfcomm_client_data connect_read_success = {
+	.server_channel = 0x0c,
+	.client_channel = 0x0c,
+	.data_len = sizeof(data),
+	.read_data = data
+};
+
 const struct rfcomm_client_data connect_nval = {
 	.server_channel = 0x0c,
 	.client_channel = 0x0e,
@@ -304,6 +327,22 @@ const struct rfcomm_server_data listen_success = {
 	.server_channel = 0x0c,
 	.client_channel = 0x0c,
 	.expected_status = true
+};
+
+const struct rfcomm_server_data listen_send_success = {
+	.server_channel = 0x0c,
+	.client_channel = 0x0c,
+	.expected_status = true,
+	.data_len = sizeof(data),
+	.send_data = data
+};
+
+const struct rfcomm_server_data listen_read_success = {
+	.server_channel = 0x0c,
+	.client_channel = 0x0c,
+	.expected_status = true,
+	.data_len = sizeof(data),
+	.read_data = data
 };
 
 const struct rfcomm_server_data listen_nval = {
@@ -366,6 +405,31 @@ static int connect_rfcomm_sock(int sk, const bdaddr_t *bdaddr, uint8_t channel)
 	return 0;
 }
 
+static gboolean client_received_data(GIOChannel *io, GIOCondition cond,
+							gpointer user_data)
+{
+	struct test_data *data = tester_get_data();
+	const struct rfcomm_client_data *client_data = data->test_data;
+	int sk;
+	ssize_t ret;
+	char buf[248];
+
+	sk = g_io_channel_unix_get_fd(io);
+
+	ret = read(sk, buf, client_data->data_len);
+	if (client_data->data_len != ret) {
+		tester_test_failed();
+		return false;
+	}
+
+	if (memcmp(client_data->read_data, buf, client_data->data_len))
+		tester_test_failed();
+	else
+		tester_test_passed();
+
+	return false;
+}
+
 static gboolean rc_connect_cb(GIOChannel *io, GIOCondition cond,
 		gpointer user_data)
 {
@@ -389,12 +453,83 @@ static gboolean rc_connect_cb(GIOChannel *io, GIOCondition cond,
 		return false;
 	}
 
+	if (client_data->send_data) {
+		ssize_t ret;
+
+		ret = write(sk, client_data->send_data, client_data->data_len);
+		if (client_data->data_len != ret)
+			tester_test_failed();
+
+		return false;
+	} else if (client_data->read_data) {
+		g_io_add_watch(io, G_IO_IN, client_received_data, NULL);
+		bthost_send_rfcomm_data(hciemu_client_get_host(data->hciemu),
+						data->conn_handle,
+						client_data->client_channel,
+						client_data->read_data,
+						client_data->data_len);
+		return false;
+	}
+
 	if (err < 0)
 		tester_test_failed();
 	else
 		tester_test_passed();
 
 	return false;
+}
+
+static void client_hook_func(const void *data, uint16_t len,
+							void *user_data)
+{
+	struct test_data *test_data = tester_get_data();
+	const struct rfcomm_client_data *client_data = test_data->test_data;
+	ssize_t ret;
+
+	if (client_data->data_len != len) {
+		tester_test_failed();
+		return;
+	}
+
+	ret = memcmp(client_data->send_data, data, len);
+	if (ret)
+		tester_test_failed();
+	else
+		tester_test_passed();
+}
+
+static void server_hook_func(const void *data, uint16_t len,
+							void *user_data)
+{
+	struct test_data *test_data = tester_get_data();
+	const struct rfcomm_server_data *server_data = test_data->test_data;
+	ssize_t ret;
+
+	if (server_data->data_len != len) {
+		tester_test_failed();
+		return;
+	}
+
+	ret = memcmp(server_data->send_data, data, len);
+	if (ret)
+		tester_test_failed();
+	else
+		tester_test_passed();
+}
+
+static void rfcomm_connect_cb(uint16_t handle, uint16_t cid,
+						void *user_data, bool status)
+{
+	struct test_data *data = tester_get_data();
+	const struct rfcomm_client_data *client_data = data->test_data;
+	struct bthost *bthost = hciemu_client_get_host(data->hciemu);
+
+	if (client_data->send_data)
+		bthost_add_rfcomm_chan_hook(bthost, handle,
+						client_data->client_channel,
+						client_hook_func, NULL);
+	else if (client_data->read_data)
+		data->conn_handle = handle;
 }
 
 static void test_connect(const void *test_data)
@@ -408,7 +543,7 @@ static void test_connect(const void *test_data)
 
 	bthost_add_l2cap_server(bthost, 0x0003, NULL, NULL);
 	bthost_add_rfcomm_server(bthost, client_data->server_channel,
-								NULL, NULL);
+						rfcomm_connect_cb, NULL);
 
 	master_addr = hciemu_get_master_bdaddr(data->hciemu);
 	client_addr = hciemu_get_client_bdaddr(data->hciemu);
@@ -432,10 +567,36 @@ static void test_connect(const void *test_data)
 	tester_print("Connect in progress %d", sk);
 }
 
+static gboolean server_received_data(GIOChannel *io, GIOCondition cond,
+							gpointer user_data)
+{
+	struct test_data *data = tester_get_data();
+	const struct rfcomm_server_data *server_data = data->test_data;
+	char buf[1024];
+	ssize_t ret;
+	int sk;
+
+	sk = g_io_channel_unix_get_fd(io);
+
+	ret = read(sk, buf, server_data->data_len);
+	if (ret != server_data->data_len) {
+		tester_test_failed();
+		return false;
+	}
+
+	if (memcmp(buf, server_data->read_data, server_data->data_len))
+		tester_test_failed();
+	else
+		tester_test_passed();
+
+	return false;
+}
+
 static gboolean rfcomm_listen_cb(GIOChannel *io, GIOCondition cond,
 							gpointer user_data)
 {
 	struct test_data *data = tester_get_data();
+	const struct rfcomm_server_data *server_data = data->test_data;
 	int sk, new_sk;
 
 	data->io_id = 0;
@@ -445,6 +606,29 @@ static gboolean rfcomm_listen_cb(GIOChannel *io, GIOCondition cond,
 	new_sk = accept(sk, NULL, NULL);
 	if (new_sk < 0) {
 		tester_test_failed();
+		return false;
+	}
+
+	if (server_data->send_data) {
+		ssize_t ret;
+
+		ret = write(new_sk, server_data->send_data,
+							server_data->data_len);
+		if (ret != server_data->data_len)
+			tester_test_failed();
+
+		close(new_sk);
+		return false;
+	} else if (server_data->read_data) {
+		GIOChannel *new_io;
+
+		new_io = g_io_channel_unix_new(new_sk);
+		g_io_channel_set_close_on_unref(new_io, TRUE);
+
+		data->io_id = g_io_add_watch(new_io, G_IO_IN,
+						server_received_data, NULL);
+
+		g_io_channel_unref(new_io);
 		return false;
 	}
 
@@ -460,6 +644,18 @@ static void connection_cb(uint16_t handle, uint16_t cid, void *user_data,
 {
 	struct test_data *data = tester_get_data();
 	const struct rfcomm_server_data *server_data = data->test_data;
+	struct bthost *bthost = hciemu_client_get_host(data->hciemu);
+
+	if (server_data->read_data) {
+		data->conn_handle = handle;
+		bthost_send_rfcomm_data(bthost, data->conn_handle,
+						server_data->client_channel,
+						server_data->read_data,
+						server_data->data_len);
+		return;
+	} else if (server_data->data_len) {
+		return;
+	}
 
 	if (server_data->expected_status == status)
 		tester_test_passed();
@@ -474,6 +670,9 @@ static void client_new_conn(uint16_t handle, void *user_data)
 	struct bthost *bthost;
 
 	bthost = hciemu_client_get_host(data->hciemu);
+	bthost_add_rfcomm_chan_hook(bthost, handle,
+						server_data->client_channel,
+						server_hook_func, NULL);
 	bthost_connect_rfcomm(bthost, handle, server_data->client_channel,
 						connection_cb, NULL);
 }
@@ -540,10 +739,22 @@ int main(int argc, char *argv[])
 					setup_powered_client, test_basic);
 	test_rfcomm("Basic RFCOMM Socket Client - Success", &connect_success,
 					setup_powered_client, test_connect);
+	test_rfcomm("Basic RFCOMM Socket Client - Write Success",
+				&connect_send_success, setup_powered_client,
+				test_connect);
+	test_rfcomm("Basic RFCOMM Socket Client - Read Success",
+				&connect_read_success, setup_powered_client,
+				test_connect);
 	test_rfcomm("Basic RFCOMM Socket Client - Conn Refused",
 			&connect_nval, setup_powered_client, test_connect);
 	test_rfcomm("Basic RFCOMM Socket Server - Success", &listen_success,
 					setup_powered_server, test_server);
+	test_rfcomm("Basic RFCOMM Socket Server - Write Success",
+				&listen_send_success, setup_powered_server,
+				test_server);
+	test_rfcomm("Basic RFCOMM Socket Server - Read Success",
+				&listen_read_success, setup_powered_server,
+				test_server);
 	test_rfcomm("Basic RFCOMM Socket Server - Conn Refused", &listen_nval,
 					setup_powered_server, test_server);
 

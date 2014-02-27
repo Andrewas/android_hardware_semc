@@ -2,21 +2,21 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2013-2014  Intel Corporation. All rights reserved.
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
@@ -43,7 +43,7 @@
 
 #include <glib.h>
 
-#include "log.h"
+#include "src/log.h"
 #include "src/sdpd.h"
 
 #include "lib/bluetooth.h"
@@ -55,6 +55,8 @@
 #include "ipc.h"
 #include "a2dp.h"
 #include "pan.h"
+#include "avrcp.h"
+#include "handsfree.h"
 
 #define STARTUP_GRACE_SECONDS 5
 #define SHUTDOWN_GRACE_SECONDS 10
@@ -107,6 +109,20 @@ static void service_register(const void *buf, uint16_t len)
 		}
 
 		break;
+	case HAL_SERVICE_ID_AVRCP:
+		if (!bt_avrcp_register(&adapter_bdaddr)) {
+			status = HAL_STATUS_FAILED;
+			goto failed;
+		}
+
+		break;
+	case HAL_SERVICE_ID_HANDSFREE:
+		if (!bt_handsfree_register(&adapter_bdaddr)) {
+			status = HAL_STATUS_FAILED;
+			goto failed;
+		}
+
+		break;
 	default:
 		DBG("service %u not supported", m->service_id);
 		status = HAL_STATUS_FAILED;
@@ -148,6 +164,12 @@ static void service_unregister(const void *buf, uint16_t len)
 		break;
 	case HAL_SERVICE_ID_PAN:
 		bt_pan_unregister();
+		break;
+	case HAL_SERVICE_ID_AVRCP:
+		bt_avrcp_unregister();
+		break;
+	case HAL_SERVICE_ID_HANDSFREE:
+		bt_handsfree_unregister();
 		break;
 	default:
 		/* This would indicate bug in HAL, as unregister should not be
@@ -326,6 +348,9 @@ static void cleanup_services(void)
 			break;
 		case HAL_SERVICE_ID_PAN:
 			bt_pan_unregister();
+			break;
+		case HAL_SERVICE_ID_HANDSFREE:
+			bt_handsfree_unregister();
 			break;
 		}
 

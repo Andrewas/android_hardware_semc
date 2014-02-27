@@ -488,12 +488,25 @@ static const struct smp_data smp_server_nval_req_2_test = {
 	.req_count = G_N_ELEMENTS(srv_nval_req_1),
 };
 
+static const uint8_t smp_nval_req_3[] = { 0x01, 0xff };
+static const uint8_t smp_nval_req_3_rsp[] = { 0x05, 0x08 };
+
+static const struct smp_req_rsp srv_nval_req_2[] = {
+	{ smp_nval_req_2, sizeof(smp_nval_req_3),
+			smp_nval_req_3_rsp, sizeof(smp_nval_req_3_rsp) },
+};
+
+static const struct smp_data smp_server_nval_req_3_test = {
+	.req = srv_nval_req_2,
+	.req_count = G_N_ELEMENTS(srv_nval_req_2),
+};
+
 static const uint8_t smp_basic_req_1[] = {	0x01,	/* Pairing Request */
 						0x03,	/* NoInputNoOutput */
 						0x00,	/* OOB Flag */
 						0x01,	/* Bonding - no MITM */
 						0x10,	/* Max key size */
-						0x00,	/* Init. key dist. */
+						0x01,	/* Init. key dist. */
 						0x01,	/* Rsp. key dist. */
 };
 static const uint8_t smp_basic_req_1_rsp[] = {	0x02,	/* Pairing Response */
@@ -501,7 +514,7 @@ static const uint8_t smp_basic_req_1_rsp[] = {	0x02,	/* Pairing Response */
 						0x00,	/* OOB Flag */
 						0x01,	/* Bonding - no MITM */
 						0x10,	/* Max key size */
-						0x00,	/* Init. key dist. */
+						0x01,	/* Init. key dist. */
 						0x01,	/* Rsp. key dist. */
 };
 
@@ -873,6 +886,9 @@ int main(int argc, char *argv[])
 					setup_powered_server, test_server);
 	test_smp("SMP Server - Invalid Request 2",
 					&smp_server_nval_req_2_test,
+					setup_powered_server, test_server);
+	test_smp("SMP Server - Invalid Request 3",
+					&smp_server_nval_req_3_test,
 					setup_powered_server, test_server);
 
 	test_smp("SMP Client - Basic Request 1",

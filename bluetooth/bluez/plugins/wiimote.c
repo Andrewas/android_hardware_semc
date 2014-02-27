@@ -30,11 +30,11 @@
 #include <bluetooth/bluetooth.h>
 #include <glib.h>
 
-#include "plugin.h"
-#include "adapter.h"
-#include "device.h"
-#include "log.h"
-#include "storage.h"
+#include "src/plugin.h"
+#include "src/adapter.h"
+#include "src/device.h"
+#include "src/log.h"
+#include "src/storage.h"
 
 /*
  * Nintendo Wii Remote devices require the bdaddr of the host as pin input for
@@ -90,7 +90,6 @@ static ssize_t wii_pincb(struct btd_adapter *adapter, struct btd_device *device,
 	product = btd_device_get_product(device);
 
 	device_get_name(device, name, sizeof(name));
-	name[sizeof(name) - 1] = 0;
 
 	for (i = 0; i < G_N_ELEMENTS(wii_ids); ++i) {
 		if (vendor == wii_ids[i][0] && product == wii_ids[i][1])

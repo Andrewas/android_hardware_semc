@@ -614,14 +614,20 @@ Notifications:
 		                      0x01 = Boot
 		                      0xff = Unsupported
 
-	Opcode 0x84 - Get Report notification
+	Opcode 0x84 - Idle Time notification
+
+		Notification parameters: Remote address (6 octets)
+		                         Status (1 octet)
+		                         Idle time (2 octets)
+
+	Opcode 0x85 - Get Report notification
 
 		Notification parameters: Remote address (6 octets)
 		                         Status (1 octet)
 		                         Report length (2 octets)
 		                         Report data (variable)
 
-	Opcode 0x85 - Virtual Unplug notification
+	Opcode 0x86 - Virtual Unplug notification
 
 		Notification parameters: Remote address (6 octets)
 		                         Status (1 octet)
@@ -970,6 +976,7 @@ Notifications:
 	Opcode 0x86 - Volume Command notification
 
 		Notification parameters: Volume type (1 octet)
+		                         Volume (1 octet)
 
 		Valid volume types: 0x00 = Speaker
 		                    0x01 = Microphone
@@ -1173,19 +1180,224 @@ Bluetooth Remote Control HAL (ID 8)
 Android HAL name: "avrcp" (BT_PROFILE_AV_RC_ID)
 
 	Opcode 0x00 - Error response
-	Opcode 0x01 - Get Play Status command/response
-	Opcode 0x02 - List Player Application Attributes command/response
-	Opcode 0x03 - List Player Application Values command/response
-	Opcode 0x04 - Get Player Application Values command/response
-	Opcode 0x05 - Get Player Application Attributes Text command/response
-	Opcode 0x06 - Get Player Application Values Text command/response
-	Opcode 0x07 - Get Element Attributes Text command/response
-	Opcode 0x08 - Set Player Attributes Value command/response
-	Opcode 0x09 - Register Notification command/response
 
-	Opcode 0x81 - Get Play Status notification
-	Opcode 0x82 - List Player Application Attributes notification
-	...
+		Response parameters: Status (1 octet)
+
+		Valid status values: 0x01 = Fail
+		                     0x02 = Not ready
+		                     0x03 = No memory
+		                     0x04 = Busy
+		                     0x05 = Done (already completed)
+		                     0x06 = Unsupported
+		                     0x07 = Parameter invalid
+		                     0x08 = Unhandled
+		                     0x09 = Authentication failure
+		                     0x0a = Remote device down
+
+	Opcode 0x01 - Get Play Status Response command/response
+
+		Command parameters: Status (1 octet)
+		                    Duration (4 octets)
+		                    Position (4 octets)
+
+		In case of an error, the error response will be returned.
+
+		Valid status values: 0x00 = Stopped
+		                     0x01 = Playing
+		                     0x02 = Paused
+		                     0x03 = Fwd seek
+		                     0x04 = Rev seek
+		                     0xff = Error
+
+	Opcode 0x02 - List Player Attributes Response command/response
+
+		Command parameters: Number of attributes (1 octet)
+		                    Attribute # (1 octet)
+		                    ...
+
+		In case of an error, the error response will be returned.
+
+		Valid attributes: 0x01 = Equalizer
+		                  0x02 = Repead
+		                  0x03 = Shuffle
+		                  0x04 = Scan
+
+	Opcode 0x03 - List Player Values Response command/response
+
+		Command parameters: Number of values (1 octet)
+		                    Value # (1 octet)
+		                    ...
+
+		In case of an error, the error response will be returned.
+
+	Opcode 0x04 - Get Player Values Response command/response
+
+		Command parameters: Number of attributes (1 octet)
+		                    Attribute # (1 octet)
+		                    Value # (1 octet)
+		                    ...
+
+		In case of an error, the error response will be returned.
+
+		Valid attributes: Same as in List Player Attributes
+
+	Opcode 0x05 - Get Player Attributes Text Response command/response
+
+		Command parameters: Number of attributes (1 octet)
+		                    Attribute # (1 octet)
+		                    Attribute # text length (1 octet)
+		                    Attribute # text (variable)
+		                    ...
+
+		In case of an error, the error response will be returned.
+
+		Valid attributes: Same as in List Player Attributes
+
+	Opcode 0x06 - Get Player Values Text Response command/response
+
+		Command parameters: Number of values (1 octet)
+		                    Value # (1 octet)
+		                    Value # text length (1 octet)
+		                    Value # text (variable)
+		                    ...
+
+		In case of an error, the error response will be returned.
+
+	Opcode 0x07 - Get Element Attributes Text Response command/response
+
+		Command parameters: Number of elements (1 octet)
+		                    Element # (1 octet)
+		                    Element # text length (1 octet)
+		                    Element # text (variable)
+		                    ...
+
+		In case of an error, the error response will be returned.
+
+		Valid elements: 0x01 = Title
+		                0x02 = Artist
+		                0x03 = Album
+		                0x04 = Track Number
+		                0x05 = Number of Tracks
+		                0x06 = Genre
+		                0x06 = Duration
+
+	Opcode 0x08 - Set Player Attributes Value Response command/response
+
+		Command parameters: Status (1 octet)
+
+		In case of an error, the error response will be returned.
+
+		Valid status values: Same as in Get Play Status Response
+
+	Opcode 0x09 - Register Notification Response command/response
+
+		Command parameters: Event (1 octet)
+		                    Type (1 octet)
+		                    Data length (1 octet)
+		                    Data (variable)
+
+		In case of an error, the error response will be returned.
+
+		Valid event values: 0x01 = Status Changed
+		                    0x02 = Track Changed
+		                    0x03 = Track Reached End
+		                    0x04 = Track Reached Start
+		                    0x05 = Position Changed
+		                    0x08 = Setting Changed
+
+		Valid type values : 0x00 = Interim
+		                    0x01 = Changed
+
+	Opcode 0x0a - Set Volume command/response
+
+		Command parameters: Value (1 octet)
+
+		In case of an error, the error response will be returned.
+
+	Opcode 0x81 - Remote Features notification
+
+		Notification parameters: Remote address (6 octets)
+		                         Features (1 octet)
+
+		Valid features values : 0x00 = None
+		                        0x01 = Metadata
+		                        0x02 = Absolute Volume
+		                        0x03 = Browse
+
+	Opcode 0x82 - Get Play Status notification
+
+		Notification parameters: <none>
+
+	Opcode 0x83 - List Player Attributes notification
+
+		Notification parameters: <none>
+
+	Opcode 0x84 - List Player Values notification
+
+		Notification parameters: Attribute (1 octet)
+
+		Valid attribute values: Same as in List Player Attributes
+
+	Opcode 0x85 - Get Player Values notification
+
+		Notification parameters: Number of attributes (1 octet)
+		                         Attribute # (1 octet)
+		                         ...
+
+		Valid attribute values: Same as in List Player Attributes
+
+	Opcode 0x86 - Get Player Attributes Text notification
+
+		Notification parameters: Number of attributes (1 octet)
+		                         Attribute # (1 octet)
+		                         ...
+
+		Valid attribute values: Same as in List Player Attributes
+
+	Opcode 0x87 - Get Player Values Text notification
+
+		Notification parameters: Attribute (1 octet)
+		                         Number of values (1 octet)
+		                         Value # (1 octet)
+		                         ...
+
+		Valid attribute values: Same as in List Player Attributes
+
+	Opcode 0x88 - Set Player Values notification
+
+		Notification parameters: Number of attributes (1 octet)
+		                         Attribute # (1 octet)
+		                         Value # (1 octet)
+		                         ...
+
+		Valid attribute values: Same as in List Player Attributes
+
+	Opcode 0x89 - Get Element Attributes notification
+
+		Notification parameters: Number of attributes (1 octet)
+		                         Attribute # (1 octet)
+		                         ...
+
+		Valid attribute values: Same as in Get Element Attribute
+
+	Opcode 0x8a - Register Notification notification
+
+		Notification parameters: Event (1 octet)
+		                         Parameter (4 octets)
+
+		Valid event values: Same as in Register Notification
+
+	Opcode 0x8b - Volume Changed notification
+
+		Notification parameters: Volume (1 octet)
+		                         Type (1 octet)
+
+		Valid type values: Same as in Register Notification
+
+	Opcode 0x8c - Passthrough Command notification
+
+		Notification parameters: ID (1 octet)
+		                         State (1 octet)
 
 
 Bluetooth GATT HAL (ID 9)

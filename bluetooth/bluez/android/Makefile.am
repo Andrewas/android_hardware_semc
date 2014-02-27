@@ -21,20 +21,26 @@ android_bluetoothd_SOURCES = android/main.c \
 				android/utils.h \
 				src/sdpd-database.c src/sdpd-server.c \
 				src/sdpd-service.c src/sdpd-request.c \
-				src/glib-helper.h src/glib-helper.c \
+				src/uuid-helper.h src/uuid-helper.c \
 				src/eir.h src/eir.c \
 				src/shared/io.h src/shared/io-glib.c \
 				src/shared/queue.h src/shared/queue.c \
 				src/shared/util.h src/shared/util.c \
 				src/shared/mgmt.h src/shared/mgmt.c \
+				src/shared/ringbuf.h src/shared/ringbuf.c \
+				src/shared/hfp.h src/shared/hfp.c \
 				android/bluetooth.h android/bluetooth.c \
 				android/hidhost.h android/hidhost.c \
 				android/ipc.h android/ipc.c \
 				android/audio-ipc.h android/audio-ipc.c \
 				android/avdtp.h android/avdtp.c \
 				android/a2dp.h android/a2dp.c \
+				android/avctp.h android/avctp.c \
+				android/avrcp.h android/avrcp.c \
+				android/avrcp-lib.h android/avrcp-lib.c \
 				android/socket.h android/socket.c \
 				android/pan.h android/pan.c \
+				android/handsfree.h android/handsfree.c \
 				btio/btio.h btio/btio.c \
 				src/sdp-client.h src/sdp-client.c \
 				profiles/network/bnep.h profiles/network/bnep.c
@@ -44,10 +50,12 @@ android_bluetoothd_LDADD = lib/libbluetooth-internal.la @GLIB_LIBS@
 plugin_LTLIBRARIES += android/bluetooth.default.la
 
 android_bluetooth_default_la_SOURCES = android/hal.h android/hal-bluetooth.c \
-					android/hal-sock.c \
+					android/hal-socket.c \
 					android/hal-hidhost.c \
 					android/hal-pan.c \
 					android/hal-a2dp.c \
+					android/hal-avrcp.c \
+					android/hal-handsfree.c \
 					android/hardware/bluetooth.h \
 					android/hardware/bt_av.h \
 					android/hardware/bt_gatt.h \
@@ -82,6 +90,7 @@ android_haltest_SOURCES = android/client/haltest.c \
 				android/client/tabcompletion.c \
 				android/client/if-main.h \
 				android/client/if-av.c \
+				android/client/if-rc.c \
 				android/client/if-bt.c \
 				android/client/if-gatt.c \
 				android/client/if-hf.c \
@@ -95,7 +104,7 @@ android_haltest_SOURCES = android/client/haltest.c \
 android_haltest_CFLAGS = $(AM_CFLAGS) -I$(srcdir)/android \
 				-DPLUGINDIR=\""$(android_plugindir)"\"
 
-android_haltest_LDFLAGS = -pthread -ldl
+android_haltest_LDFLAGS = -pthread -ldl -lm
 
 noinst_PROGRAMS += android/android-tester
 
@@ -118,8 +127,6 @@ android_android_tester_CFLAGS = $(AM_CFLAGS) -I$(srcdir)/android \
 android_android_tester_LDADD = lib/libbluetooth-internal.la @GLIB_LIBS@
 
 android_android_tester_LDFLAGS = -pthread -ldl
-
-plugin_LTLIBRARIES += android/audio.a2dp.default.la
 
 noinst_PROGRAMS += android/ipc-tester
 
@@ -147,10 +154,22 @@ android_audio_a2dp_default_la_SOURCES = android/audio-msg.h \
 					android/hardware/hardware.h \
 					android/system/audio.h
 
+unit_tests += android/test-ipc
+
+android_test_ipc_SOURCES = android/test-ipc.c \
+				src/shared/util.h src/shared/util.c \
+				src/log.h src/log.c \
+				android/ipc.c android/ipc.h
+android_test_ipc_LDADD = @GLIB_LIBS@
+
+plugin_LTLIBRARIES += android/audio.a2dp.default.la
+
 android_audio_a2dp_default_la_CFLAGS = $(AM_CFLAGS) -I$(srcdir)/android
 
+android_audio_a2dp_default_la_LIBADD = @SBC_LIBS@
+
 android_audio_a2dp_default_la_LDFLAGS = $(AM_LDFLAGS) -module -avoid-version \
-					-no-undefined -pthread
+					-no-undefined -pthread -lrt
 
 endif
 

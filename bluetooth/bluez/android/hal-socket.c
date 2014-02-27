@@ -26,11 +26,11 @@
 #include "hal-utils.h"
 #include "hal.h"
 
-static bt_status_t sock_listen(btsock_type_t type, const char *service_name,
+static bt_status_t socket_listen(btsock_type_t type, const char *service_name,
 					const uint8_t *uuid, int chan,
 					int *sock, int flags)
 {
-	struct hal_cmd_sock_listen cmd;
+	struct hal_cmd_socket_listen cmd;
 
 	if (!sock)
 		return BT_STATUS_PARM_INVALID;
@@ -51,15 +51,15 @@ static bt_status_t sock_listen(btsock_type_t type, const char *service_name,
 	if (service_name)
 		memcpy(cmd.name, service_name, strlen(service_name));
 
-	return hal_ipc_cmd(HAL_SERVICE_ID_SOCK, HAL_OP_SOCK_LISTEN,
+	return hal_ipc_cmd(HAL_SERVICE_ID_SOCK, HAL_OP_SOCKET_LISTEN,
 				sizeof(cmd), &cmd, NULL, NULL, sock);
 }
 
-static bt_status_t sock_connect(const bt_bdaddr_t *bdaddr, btsock_type_t type,
+static bt_status_t socket_connect(const bt_bdaddr_t *bdaddr, btsock_type_t type,
 					const uint8_t *uuid, int chan,
 					int *sock, int flags)
 {
-	struct hal_cmd_sock_connect cmd;
+	struct hal_cmd_socket_connect cmd;
 
 	if (!sock)
 		return BT_STATUS_PARM_INVALID;
@@ -80,17 +80,17 @@ static bt_status_t sock_connect(const bt_bdaddr_t *bdaddr, btsock_type_t type,
 	if (bdaddr)
 		memcpy(cmd.bdaddr, bdaddr, sizeof(cmd.bdaddr));
 
-	return hal_ipc_cmd(HAL_SERVICE_ID_SOCK, HAL_OP_SOCK_CONNECT,
+	return hal_ipc_cmd(HAL_SERVICE_ID_SOCK, HAL_OP_SOCKET_CONNECT,
 					sizeof(cmd), &cmd, NULL, NULL, sock);
 }
 
-static btsock_interface_t sock_if = {
-	sizeof(sock_if),
-	sock_listen,
-	sock_connect
+static btsock_interface_t socket_if = {
+	sizeof(socket_if),
+	socket_listen,
+	socket_connect
 };
 
-btsock_interface_t *bt_get_sock_interface(void)
+btsock_interface_t *bt_get_socket_interface(void)
 {
-	return &sock_if;
+	return &socket_if;
 }

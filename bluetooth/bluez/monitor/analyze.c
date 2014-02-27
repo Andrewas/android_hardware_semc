@@ -2,8 +2,8 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2011-2012  Intel Corporation
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2011-2014  Intel Corporation
+ *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This library is free software; you can redistribute it and/or
@@ -31,8 +31,8 @@
 
 #include "src/shared/util.h"
 #include "src/shared/queue.h"
+#include "src/shared/btsnoop.h"
 #include "monitor/bt.h"
-#include "btsnoop.h"
 #include "analyze.h"
 
 #define MAX_PACKET_SIZE		(1486 + 4)
@@ -255,16 +255,20 @@ static void sco_pkt(struct timeval *tv, uint16_t index,
 
 void analyze_trace(const char *path)
 {
+	struct btsnoop *btsnoop_file;
 	unsigned long num_packets = 0;
 	uint32_t type;
 
-	if (btsnoop_open(path, &type) < 0)
+	btsnoop_file = btsnoop_open(path, BTSNOOP_FLAG_PKLG_SUPPORT);
+	if (!btsnoop_file)
 		return;
+
+	type = btsnoop_get_type(btsnoop_file);
 
 	switch (type) {
 	case BTSNOOP_TYPE_HCI:
 	case BTSNOOP_TYPE_UART:
-	case BTSNOOP_TYPE_EXTENDED_HCI:
+	case BTSNOOP_TYPE_MONITOR:
 		break;
 	default:
 		fprintf(stderr, "Unsupported packet format\n");
@@ -282,7 +286,8 @@ void analyze_trace(const char *path)
 		struct timeval tv;
 		uint16_t index, opcode, pktlen;
 
-		if (btsnoop_read_hci(&tv, &index, &opcode, buf, &pktlen) < 0)
+		if (btsnoop_read_hci(btsnoop_file, &tv, &index, &opcode,
+							buf, &pktlen) < 0)
 			break;
 
 		switch (opcode) {
@@ -316,5 +321,5 @@ void analyze_trace(const char *path)
 	queue_destroy(dev_list, dev_destroy);
 
 done:
-	btsnoop_close();
+	btsnoop_unref(btsnoop_file);
 }

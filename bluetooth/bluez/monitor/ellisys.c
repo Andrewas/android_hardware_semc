@@ -2,8 +2,8 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2011-2012  Intel Corporation
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2011-2014  Intel Corporation
+ *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This library is free software; you can redistribute it and/or
@@ -37,7 +37,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 
-#include "btsnoop.h"
+#include "src/shared/btsnoop.h"
 #include "ellisys.h"
 
 static int ellisys_fd = -1;

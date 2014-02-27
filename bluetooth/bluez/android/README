@@ -7,7 +7,7 @@ of the stack of choice on Android. Android BlueZ is intended as a drop-in
 replacement to Android provided Bluetooth stack.
 
 More details about BlueZ for Android architecture and components can be found
-in android/hal-apc-api.txt file.
+in android/hal-ipc-api.txt file.
 
 Supported Android version: 4.4
 
@@ -24,6 +24,10 @@ Build requirements
 - GLib - Android 4.2 or later don't provide GLib and one must provide it in
 'external/bluetooth/glib' folder of Android tree. Sample Android GLib port
 is available at https://code.google.com/p/aosp-bluez.glib/
+
+- SBC - A2DP code requires SBC library (version 1.2 or higher) present in
+'external/bluetooth/sbc' directory. Library is build from Android.mk provided
+by BlueZ. SBC code is available at git://git.kernel.org/pub/scm/bluetooth/sbc
 
 - Bionic support - Currently only 'master' branch available at
 https://android.googlesource.com/platform/bionic provides all required
@@ -79,7 +83,52 @@ After full build is done it is possible to rebuild only BlueZ:
 
 Linux Kernel requirements
 =========================
-TODO add section about kernel requirements
+
+BlueZ for Android uses Linux Bluetooth subsystem and it must be enabled in
+kernel. Minimal required version of management interface is 1.3. This
+corresponds to Linux 3.9 but latest available version is recommended. Other
+requirements include UHID and network bridge support.
+
+Following kernel options should be enabled:
+CONFIG_BT
+CONFIG_BT_RFCOMM
+CONFIG_BT_RFCOMM_TTY
+CONFIG_BT_BNEP
+CONFIG_BT_BNEP_MC_FILTER
+CONFIG_BT_BNEP_PROTO_FILTER
+CONFIG_BRIDGE
+CONFIG_UHID
+
+Also BT chip driver needs to be enabled e.g:
+CONFIG_BT_HCIBTUSB
+
+If it is not possible to use new enough Linux kernel one can use updated
+bluetooth subsytem from Backports project. More information about Backports can
+be found at https://backports.wiki.kernel.org. Sample kernels using backports
+for running BlueZ on Android are available at
+https://code.google.com/p/aosp-bluez.
+
+Running with Valgrind
+=====================
+
+BlueZ for Android is preconfigured to be easily run under Valgrind memcheck.
+Appropriate configuration and required modules are automatically included when
+building either userdebug or eng variant of Android platform.
+
+Valgrind can be enabled in runtime by setting "persist.sys.bluetooth.valgrind"
+property to either literal "true" or any numeric value >0. For example:
+adb root
+adb shell setprop persist.sys.bluetooth.valgrind true
+
+After changing property value Bluetooth need to be restarted to apply changes
+(this can be done using UI, just disable and enable it again). Property is
+persistent, i.e. there's no need to enable Valgrind again after reboot.
+
+It's recommended to have unstripped libglib.so installed which will enable
+complete backtraces in Valgrind output. Otherwise, in many cases backtrace
+will break at e.g. g_free() function without prior callers. It's possible to
+have proper library installed automatically by appropriate entry in Android.mk,
+see https://code.google.com/p/aosp-bluez.glib/ for an example.
 
 =============================
 Building and running on Linux
@@ -105,15 +154,43 @@ automatically on HAL library initialization. To deinitialize HAL library and
 stop daemon type 'bluetooth cleanup'. Type 'help' for more information. Tab
 completion is also supported.
 
+=====================
+Implementation status
+=====================
+
+Summary of HALs implementation status.
+
+complete    - implementation is feature complete and Android Framework is able
+              to use it normally
+partial     - implementation is in progress and not all required features are
+              present, Android Framework is able to use some of features
+initial     - only initial implementations is present, Android Framework is
+              able to initialize but most likely not able to use it
+not started - no implementation, Android Framework is not able to initialize it
+
+Profile ID    HAL header         Status
+---------------------------------------
+core          bluetooth.h        complete
+a2dp          bt_av.h            complete
+gatt          bt_gatt.h          not started
+              bt_gatt_client.h   not started
+              bt_gatt_server.h   not started
+handsfree     bt_hf.h            initial
+hidhost       bt_hh.h            complete
+health        bt_hl.h            not started
+pan           bt_pan.h           complete
+avrcp         bt_rc.h            partial
+socket        bt_sock.h          complete
+
 ===========================
 Implementation shortcomings
 ===========================
 
-It is possible that some of HAL functionality is missing implementation due to
-reasons like feature feasibility or necessity for latest Android Framework.
-This sections provides list of such deficiencies. Note that HAL library is
-always expected to fully implement HAL API so missing implementation might
-happen only in daemon.
+It is possible that some of HAL functionality (although being marked as
+complete) is missing implementation due to reasons like feature feasibility or
+necessity for latest Android Framework. This sections provides list of such
+deficiencies. Note that HAL library is always expected to fully implement HAL
+API so missing implementation might happen only in daemon.
 
 HAL Bluetooth
 =============

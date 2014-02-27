@@ -33,9 +33,10 @@
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/l2cap.h>
-#include <adapter.h>
-#include <btio/btio.h>
-#include <log.h>
+
+#include "btio/btio.h"
+#include "src/adapter.h"
+#include "src/log.h"
 
 #include "mcap.h"
 #include "mcap_lib.h"
@@ -87,8 +88,6 @@ struct sync_set_data {
 	int ind_freq;
 	gboolean role;
 };
-
-#define hton64(x)     ntoh64(x)
 
 static gboolean csp_caps_initialized = FALSE;
 struct csp_caps _caps;

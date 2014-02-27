@@ -44,15 +44,16 @@
 #include <bluetooth/l2cap.h>
 
 #include <glib.h>
-#include <btio/btio.h>
 
+#include "btio/btio.h"
 #include "lib/uuid.h"
 #include "src/adapter.h"
 #include "src/device.h"
 
-#include "log.h"
-#include "error.h"
-#include "uinput.h"
+#include "src/log.h"
+#include "src/error.h"
+#include "src/uinput.h"
+
 #include "avctp.h"
 #include "avrcp.h"
 
@@ -237,25 +238,53 @@ static struct {
 	{ "ROOT MENU",		AVC_ROOT_MENU,		KEY_MENU },
 	{ "CONTENTS MENU",	AVC_CONTENTS_MENU,	KEY_PROGRAM },
 	{ "FAVORITE MENU",	AVC_FAVORITE_MENU,	KEY_FAVORITES },
+	{ "EXIT",		AVC_EXIT,		KEY_EXIT },
+	{ "ON DEMAND MENU",	AVC_ON_DEMAND_MENU,	KEY_MENU },
+	{ "APPS MENU",		AVC_APPS_MENU,		KEY_MENU },
+	{ "0",			AVC_0,			KEY_0 },
+	{ "1",			AVC_1,			KEY_1 },
+	{ "2",			AVC_2,			KEY_2 },
+	{ "3",			AVC_3,			KEY_3 },
+	{ "4",			AVC_4,			KEY_4 },
+	{ "5",			AVC_5,			KEY_5 },
+	{ "6",			AVC_6,			KEY_6 },
+	{ "7",			AVC_7,			KEY_7 },
+	{ "8",			AVC_8,			KEY_8 },
+	{ "9",			AVC_9,			KEY_9 },
+	{ "DOT",		AVC_DOT,		KEY_DOT },
 	{ "ENTER",		AVC_ENTER,		KEY_ENTER },
 	{ "CHANNEL UP",		AVC_CHANNEL_UP,		KEY_CHANNELUP },
 	{ "CHANNEL DOWN",	AVC_CHANNEL_DOWN,	KEY_CHANNELDOWN },
+	{ "CHANNEL PREVIOUS",	AVC_CHANNEL_PREVIOUS,	KEY_LAST },
 	{ "INPUT SELECT",	AVC_INPUT_SELECT,	KEY_CONFIG },
+	{ "INFO",		AVC_INFO,		KEY_INFO },
 	{ "HELP",		AVC_HELP,		KEY_HELP },
 	{ "POWER",		AVC_POWER,		KEY_POWER2 },
 	{ "VOLUME UP",		AVC_VOLUME_UP,		KEY_VOLUMEUP },
 	{ "VOLUME DOWN",	AVC_VOLUME_DOWN,	KEY_VOLUMEDOWN },
+	{ "MUTE",		AVC_MUTE,		KEY_MUTE },
 	{ "PLAY",		AVC_PLAY,		KEY_PLAYCD },
 	{ "STOP",		AVC_STOP,		KEY_STOPCD },
 	{ "PAUSE",		AVC_PAUSE,		KEY_PAUSECD },
 	{ "FORWARD",		AVC_FORWARD,		KEY_NEXTSONG },
 	{ "BACKWARD",		AVC_BACKWARD,		KEY_PREVIOUSSONG },
+	{ "RECORD",		AVC_RECORD,		KEY_RECORD },
 	{ "REWIND",		AVC_REWIND,		KEY_REWIND },
 	{ "FAST FORWARD",	AVC_FAST_FORWARD,	KEY_FASTFORWARD },
+	{ "LIST",		AVC_LIST,		KEY_LIST },
 	{ "F1",			AVC_F1,			KEY_F1 },
 	{ "F2",			AVC_F2,			KEY_F2 },
 	{ "F3",			AVC_F3,			KEY_F3 },
 	{ "F4",			AVC_F4,			KEY_F4 },
+	{ "F5",			AVC_F5,			KEY_F5 },
+	{ "F6",			AVC_F6,			KEY_F6 },
+	{ "F7",			AVC_F7,			KEY_F7 },
+	{ "F8",			AVC_F8,			KEY_F8 },
+	{ "F9",			AVC_F9,			KEY_F9 },
+	{ "RED",		AVC_RED,		KEY_RED },
+	{ "GREEN",		AVC_GREEN,		KEY_GREEN },
+	{ "BLUE",		AVC_BLUE,		KEY_BLUE },
+	{ "YELLOW",		AVC_YELLOW,		KEY_YELLOW },
 	{ NULL }
 };
 
@@ -903,8 +932,7 @@ failed:
 	return FALSE;
 }
 
-static gboolean session_cb(GIOChannel *chan, GIOCondition cond,
-				gpointer data)
+static gboolean session_cb(GIOChannel *chan, GIOCondition cond, gpointer data)
 {
 	struct avctp *session = data;
 	struct avctp_channel *control = session->control;
@@ -924,24 +952,24 @@ static gboolean session_cb(GIOChannel *chan, GIOCondition cond,
 	if (ret <= 0)
 		goto failed;
 
-	if ((unsigned int) ret < sizeof(struct avctp_header)) {
+	if (ret < AVCTP_HEADER_LENGTH) {
 		error("Too small AVCTP packet");
 		goto failed;
 	}
 
 	avctp = (struct avctp_header *) buf;
 
-	ret -= sizeof(struct avctp_header);
-	if ((unsigned int) ret < sizeof(struct avc_header)) {
-		error("Too small AVCTP packet");
+	ret -= AVCTP_HEADER_LENGTH;
+	if (ret < AVC_HEADER_LENGTH) {
+		error("Too small AVC packet");
 		goto failed;
 	}
 
-	avc = (struct avc_header *) (buf + sizeof(struct avctp_header));
+	avc = (struct avc_header *) (buf + AVCTP_HEADER_LENGTH);
 
-	ret -= sizeof(struct avc_header);
+	ret -= AVC_HEADER_LENGTH;
 
-	operands = buf + sizeof(struct avctp_header) + sizeof(struct avc_header);
+	operands = (uint8_t *) avc + AVC_HEADER_LENGTH;
 	operand_count = ret;
 
 	if (avctp->cr == AVCTP_RESPONSE) {
@@ -1582,36 +1610,16 @@ int avctp_send_browsing_req(struct avctp *session,
 	return 0;
 }
 
-static char *op2str(uint8_t op)
+static const char *op2str(uint8_t op)
 {
-	switch (op & 0x7f) {
-	case AVC_VOLUME_UP:
-		return "VOLUME UP";
-	case AVC_VOLUME_DOWN:
-		return "VOLUME DOWN";
-	case AVC_MUTE:
-		return "MUTE";
-	case AVC_PLAY:
-		return "PLAY";
-	case AVC_STOP:
-		return "STOP";
-	case AVC_PAUSE:
-		return "PAUSE";
-	case AVC_RECORD:
-		return "RECORD";
-	case AVC_REWIND:
-		return "REWIND";
-	case AVC_FAST_FORWARD:
-		return "FAST FORWARD";
-	case AVC_EJECT:
-		return "EJECT";
-	case AVC_FORWARD:
-		return "FORWARD";
-	case AVC_BACKWARD:
-		return "BACKWARD";
-	default:
-		return "UNKNOWN";
+	int i;
+
+	for (i = 0; key_map[i].name != NULL; i++) {
+		if ((op & 0x7F) == key_map[i].avc)
+			return key_map[i].name;
 	}
+
+	return "UNKNOWN";
 }
 
 static int avctp_passthrough_press(struct avctp *session, uint8_t op)

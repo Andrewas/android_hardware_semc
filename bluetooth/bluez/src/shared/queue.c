@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2012  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2012-2014  Intel Corporation. All rights reserved.
  *
  *
  *  This library is free software; you can redistribute it and/or
@@ -25,8 +25,8 @@
 #include <config.h>
 #endif
 
-#include "util.h"
-#include "queue.h"
+#include "src/shared/util.h"
+#include "src/shared/queue.h"
 
 struct queue_entry {
 	void *data;

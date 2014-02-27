@@ -2,22 +2,22 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2011-2012  Intel Corporation
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2011-2014  Intel Corporation
+ *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
@@ -42,14 +42,15 @@
 #include <bluetooth/hci_lib.h>
 
 #include "src/shared/util.h"
+#include "src/shared/btsnoop.h"
 #include "display.h"
 #include "bt.h"
 #include "ll.h"
 #include "hwdb.h"
+#include "keys.h"
 #include "uuid.h"
 #include "l2cap.h"
 #include "control.h"
-#include "btsnoop.h"
 #include "vendor.h"
 #include "packet.h"
 
@@ -403,8 +404,27 @@ void packet_print_error(const char *label, uint8_t error)
 	print_error(label, error);
 }
 
-static void print_addr(const char *label, const uint8_t *addr,
-						uint8_t addr_type)
+static void print_addr_type(const char *label, uint8_t addr_type)
+{
+	const char *str;
+
+	switch (addr_type) {
+	case 0x00:
+		str = "Public";
+		break;
+	case 0x01:
+		str = "Random";
+		break;
+	default:
+		str = "Reserved";
+		break;
+	}
+
+	print_field("%s: %s (0x%2.2x)", label, str, addr_type);
+}
+
+static void print_addr_resolve(const char *label, const uint8_t *addr,
+					uint8_t addr_type, bool resolve)
 {
 	const char *str;
 	char *company;
@@ -448,6 +468,16 @@ static void print_addr(const char *label, const uint8_t *addr,
 		print_field("%s: %2.2X:%2.2X:%2.2X:%2.2X:%2.2X:%2.2X (%s)",
 					label, addr[5], addr[4], addr[3],
 					addr[2], addr[1], addr[0], str);
+
+		if (resolve && (addr[5] & 0xc0) == 0x40) {
+			uint8_t ident[6], ident_type;
+
+			if (keys_resolve_identity(addr, ident, &ident_type)) {
+				print_addr_type("  Identity type", ident_type);
+				print_addr_resolve("  Identity", ident,
+							ident_type, false);
+			}
+		}
 		break;
 	default:
 		print_field("%s: %2.2X-%2.2X-%2.2X-%2.2X-%2.2X-%2.2X",
@@ -457,23 +487,10 @@ static void print_addr(const char *label, const uint8_t *addr,
 	}
 }
 
-static void print_addr_type(const char *label, uint8_t addr_type)
+static void print_addr(const char *label, const uint8_t *addr,
+						uint8_t addr_type)
 {
-	const char *str;
-
-	switch (addr_type) {
-	case 0x00:
-		str = "Public";
-		break;
-	case 0x01:
-		str = "Random";
-		break;
-	default:
-		str = "Reserved";
-		break;
-	}
-
-	print_field("%s: %s (0x%2.2x)", label, str, addr_type);
+	print_addr_resolve(label, addr, addr_type, true);
 }
 
 static void print_bdaddr(const uint8_t *bdaddr)
@@ -2382,13 +2399,34 @@ static void print_le_states(const uint8_t *states_array)
 
 static void print_le_channel_map(const uint8_t *map)
 {
+	unsigned int count = 0, start = 0;
 	char str[11];
-	int i;
+	int i, n;
 
 	for (i = 0; i < 5; i++)
 		sprintf(str + (i * 2), "%2.2x", map[i]);
 
 	print_field("Channel map: 0x%s", str);
+
+	for (i = 0; i < 5; i++) {
+		for (n = 0; n < 8; n++) {
+			if (map[i] & (1 << n)) {
+				if (count == 0)
+					start = (i * 8) + n;
+				count++;
+				continue;
+			}
+
+			if (count > 1) {
+				print_field("  Channel %u-%u",
+						start, start + count - 1 );
+				count = 0;
+			} else if (count > 0) {
+				print_field("  Channel %u", start);
+				count = 0;
+			}
+		}
+	}
 }
 
 void packet_print_channel_map_ll(const uint8_t *map)
@@ -3118,11 +3156,17 @@ void packet_control(struct timeval *tv, uint16_t index, uint16_t opcode,
 	control_message(opcode, data, size);
 }
 
+static int addr2str(const uint8_t *addr, char *str)
+{
+	return sprintf(str, "%2.2X:%2.2X:%2.2X:%2.2X:%2.2X:%2.2X",
+			addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
+}
+
 #define MAX_INDEX 16
 
 struct index_data {
-	uint8_t  type;
-	bdaddr_t bdaddr;
+	uint8_t type;
+	uint8_t bdaddr[6];
 };
 
 static struct index_data index_list[MAX_INDEX];
@@ -3132,7 +3176,6 @@ void packet_monitor(struct timeval *tv, uint16_t index, uint16_t opcode,
 {
 	const struct btsnoop_opcode_new_index *ni;
 	char str[18], extra_str[24];
-	bdaddr_t bdaddr;
 
 	if (index_filter && index_number != index)
 		return;
@@ -3145,21 +3188,20 @@ void packet_monitor(struct timeval *tv, uint16_t index, uint16_t opcode,
 	switch (opcode) {
 	case BTSNOOP_OPCODE_NEW_INDEX:
 		ni = data;
-		memcpy(&bdaddr, ni->bdaddr, 6);
 
 		if (index < MAX_INDEX) {
 			index_list[index].type = ni->type;
-			memcpy(&index_list[index].bdaddr, &bdaddr, 6);
+			memcpy(index_list[index].bdaddr, ni->bdaddr, 6);
 		}
 
-		ba2str(&bdaddr, str);
+		addr2str(ni->bdaddr, str);
 		packet_new_index(tv, index, str, ni->type, ni->bus, ni->name);
 		break;
 	case BTSNOOP_OPCODE_DEL_INDEX:
 		if (index < MAX_INDEX)
-			ba2str(&index_list[index].bdaddr, str);
+			addr2str(index_list[index].bdaddr, str);
 		else
-			ba2str(BDADDR_ANY, str);
+			sprintf(str, "00:00:00:00:00:00");
 
 		packet_del_index(tv, index, str);
 		break;

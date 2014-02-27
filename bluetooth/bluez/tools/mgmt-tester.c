@@ -304,7 +304,7 @@ static void test_condition_complete(struct test_data *data)
 		user->test_data = data; \
 		user->expected_version = 0x06; \
 		user->expected_manufacturer = 0x003f; \
-		user->expected_supported_settings = 0x00000fff; \
+		user->expected_supported_settings = 0x00001fff; \
 		user->initial_settings = 0x00000080; \
 		user->unmet_conditions = 0; \
 		tester_add_full(name, data, \
@@ -323,7 +323,7 @@ static void test_condition_complete(struct test_data *data)
 		user->test_data = data; \
 		user->expected_version = 0x05; \
 		user->expected_manufacturer = 0x003f; \
-		user->expected_supported_settings = 0x000001ff; \
+		user->expected_supported_settings = 0x000011ff; \
 		user->initial_settings = 0x00000080; \
 		user->unmet_conditions = 0; \
 		tester_add_full(name, data, \
@@ -342,7 +342,7 @@ static void test_condition_complete(struct test_data *data)
 		user->test_data = data; \
 		user->expected_version = 0x06; \
 		user->expected_manufacturer = 0x003f; \
-		user->expected_supported_settings = 0x00000611; \
+		user->expected_supported_settings = 0x00001611; \
 		user->initial_settings = 0x00000200; \
 		user->unmet_conditions = 0; \
 		tester_add_full(name, data, \
@@ -2157,33 +2157,20 @@ static const char load_ltks_invalid_param_2[] = {
 	0x00, 0x00,					/* diversifier */
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* rand */
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* value (1/2) */
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* value (2/2 */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* value (2/2) */
 };
-/* Invalid authenticated value */
+/* Invalid master value */
 static const char load_ltks_invalid_param_3[] = {
 	0x01, 0x00,					/* count */
 	0x00, 0x01, 0x02, 0x03, 0x04, 0x05,		/* bdaddr */
 	0x01,						/* addr type */
-	0x02,						/* authenticated */
-	0x00,						/* master */
-	0x00,						/* encryption size */
-	0x00, 0x00,					/* diversifier */
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* rand */
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* value (1/2) */
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* value (2/2 */
-};
-/* Invalid master value */
-static const char load_ltks_invalid_param_4[] = {
-	0x01, 0x00,					/* count */
-	0x00, 0x01, 0x02, 0x03, 0x04, 0x05,		/* bdaddr */
-	0x01,						/* addr type */
-	0x00,						/* authunticated */
+	0x00,						/* authenticated */
 	0x02,						/* master */
 	0x00,						/* encryption size */
 	0x00, 0x00,					/* diversifier */
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* rand */
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* value (1/2) */
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* value (2/2 */
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* value (2/2) */
 };
 
 static const struct generic_data load_ltks_success_test_1 = {
@@ -2211,13 +2198,6 @@ static const struct generic_data load_ltks_invalid_params_test_3 = {
 	.send_opcode = MGMT_OP_LOAD_LONG_TERM_KEYS,
 	.send_param = load_ltks_invalid_param_3,
 	.send_len = sizeof(load_ltks_invalid_param_3),
-	.expect_status = MGMT_STATUS_INVALID_PARAMS,
-};
-
-static const struct generic_data load_ltks_invalid_params_test_4 = {
-	.send_opcode = MGMT_OP_LOAD_LONG_TERM_KEYS,
-	.send_param = load_ltks_invalid_param_4,
-	.send_len = sizeof(load_ltks_invalid_param_4),
 	.expect_status = MGMT_STATUS_INVALID_PARAMS,
 };
 
@@ -3847,9 +3827,6 @@ int main(int argc, char *argv[])
 				NULL, test_command_generic);
 	test_bredrle("Load Long Term Keys - Invalid Parameters 3",
 				&load_ltks_invalid_params_test_3,
-				NULL, test_command_generic);
-	test_bredrle("Load Long Term Keys - Invalid Parameters 4",
-				&load_ltks_invalid_params_test_4,
 				NULL, test_command_generic);
 
 	test_bredrle("Pair Device - Not Powered 1",

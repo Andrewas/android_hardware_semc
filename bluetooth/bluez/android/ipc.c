@@ -2,21 +2,21 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2013-2014  Intel Corporation. All rights reserved.
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
@@ -38,12 +38,15 @@
 
 #include "hal-msg.h"
 #include "ipc.h"
-#include "log.h"
+#include "src/log.h"
 
 static struct service_handler services[HAL_SERVICE_ID_MAX + 1];
 
 static GIOChannel *cmd_io = NULL;
 static GIOChannel *notif_io = NULL;
+
+static guint cmd_watch = 0;
+static guint notif_watch = 0;
 
 int ipc_handle_msg(struct service_handler *handlers, size_t max_index,
 						const void *buf, ssize_t len)
@@ -141,7 +144,8 @@ static gboolean notif_watch_cb(GIOChannel *io, GIOCondition cond,
 	return FALSE;
 }
 
-GIOChannel *ipc_connect(const char *path, size_t size, GIOFunc connect_cb)
+GIOChannel *ipc_connect(const char *path, size_t size, GIOFunc connect_cb,
+							void *user_data)
 {
 	struct sockaddr_un addr;
 	GIOCondition cond;
@@ -165,16 +169,11 @@ GIOChannel *ipc_connect(const char *path, size_t size, GIOFunc connect_cb)
 
 	memcpy(addr.sun_path, path, size);
 
-	if (connect(sk, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-		error("IPC: failed to connect HAL socket %s: %d (%s)", &path[1],
-							errno, strerror(errno));
-		g_io_channel_unref(io);
-		return NULL;
-	}
+	connect(sk, (struct sockaddr *) &addr, sizeof(addr));
 
 	cond = G_IO_OUT | G_IO_ERR | G_IO_HUP | G_IO_NVAL;
 
-	g_io_add_watch(io, cond, connect_cb, NULL);
+	g_io_add_watch(io, cond, connect_cb, user_data);
 
 	return io;
 }
@@ -192,11 +191,11 @@ static gboolean notif_connect_cb(GIOChannel *io, GIOCondition cond,
 
 	cond = G_IO_ERR | G_IO_HUP | G_IO_NVAL;
 
-	g_io_add_watch(io, cond, notif_watch_cb, NULL);
+	notif_watch = g_io_add_watch(io, cond, notif_watch_cb, NULL);
 
 	cond = G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL;
 
-	g_io_add_watch(cmd_io, cond, cmd_watch_cb, NULL);
+	cmd_watch = g_io_add_watch(cmd_io, cond, cmd_watch_cb, NULL);
 
 	info("IPC: successfully connected");
 
@@ -215,7 +214,7 @@ static gboolean cmd_connect_cb(GIOChannel *io, GIOCondition cond,
 	}
 
 	notif_io = ipc_connect(BLUEZ_HAL_SK_PATH, sizeof(BLUEZ_HAL_SK_PATH),
-							notif_connect_cb);
+						notif_connect_cb, NULL);
 	if (!notif_io)
 		raise(SIGTERM);
 
@@ -225,17 +224,27 @@ static gboolean cmd_connect_cb(GIOChannel *io, GIOCondition cond,
 void ipc_init(void)
 {
 	cmd_io = ipc_connect(BLUEZ_HAL_SK_PATH, sizeof(BLUEZ_HAL_SK_PATH),
-							cmd_connect_cb);
+						cmd_connect_cb, NULL);
 	if (!cmd_io)
 		raise(SIGTERM);
 }
 
 void ipc_cleanup(void)
 {
+	if (cmd_watch) {
+		g_source_remove(cmd_watch);
+		cmd_watch = 0;
+	}
+
 	if (cmd_io) {
 		g_io_channel_shutdown(cmd_io, TRUE, NULL);
 		g_io_channel_unref(cmd_io);
 		cmd_io = NULL;
+	}
+
+	if (notif_watch) {
+		g_source_remove(notif_watch);
+		notif_watch = 0;
 	}
 
 	if (notif_io) {

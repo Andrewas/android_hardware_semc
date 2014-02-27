@@ -36,6 +36,7 @@
 #define INVALID_PASSKEY		0xffffffff
 
 struct btd_adapter;
+struct btd_device;
 
 struct btd_adapter *btd_adapter_get_default(void);
 bool btd_adapter_is_default(struct btd_adapter *adapter);
@@ -58,24 +59,6 @@ struct oob_handler {
 	void *user_data;
 };
 
-struct link_key_info {
-	bdaddr_t bdaddr;
-	unsigned char key[16];
-	uint8_t type;
-	uint8_t pin_len;
-};
-
-struct smp_ltk_info {
-	bdaddr_t bdaddr;
-	uint8_t bdaddr_type;
-	uint8_t authenticated;
-	uint8_t master;
-	uint8_t enc_size;
-	uint16_t ediv;
-	uint8_t rand[8];
-	uint8_t val[16];
-};
-
 int adapter_init(void);
 void adapter_cleanup(void);
 void adapter_shutdown(void);
@@ -90,6 +73,8 @@ bool btd_adapter_get_connectable(struct btd_adapter *adapter);
 
 uint32_t btd_adapter_get_class(struct btd_adapter *adapter);
 const char *btd_adapter_get_name(struct btd_adapter *adapter);
+void btd_adapter_remove_device(struct btd_adapter *adapter,
+				struct btd_device *dev);
 struct btd_device *btd_adapter_get_device(struct btd_adapter *adapter,
 					const bdaddr_t *addr,
 					uint8_t addr_type);

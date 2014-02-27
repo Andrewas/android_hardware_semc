@@ -2,21 +2,21 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2013-2014  Intel Corporation. All rights reserved.
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
+ *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
@@ -36,19 +36,20 @@
 #include "lib/sdp_lib.h"
 #include "src/sdp-client.h"
 #include "src/sdpd.h"
+#include "src/log.h"
 
 #include "bluetooth.h"
-#include "log.h"
 #include "hal-msg.h"
 #include "hal-ipc.h"
 #include "ipc.h"
 #include "utils.h"
 #include "socket.h"
 
-#define SPP_DEFAULT_CHANNEL	3
-#define OPP_DEFAULT_CHANNEL	9
-#define PBAP_DEFAULT_CHANNEL	15
-#define MAS_DEFAULT_CHANNEL	16
+#define RFCOMM_CHANNEL_MAX 30
+
+#define OPP_DEFAULT_CHANNEL	12
+#define HFAG_DEFAULT_CHANNEL	13
+#define PBAP_DEFAULT_CHANNEL	19
 
 #define SVC_HINT_OBEX 0x10
 
@@ -59,46 +60,51 @@
 #define MAP_MSG_TYPE_SMS_CDMA	0x04
 #define DEFAULT_MAS_MSG_TYPE	(MAP_MSG_TYPE_SMS_GSM | MAP_MSG_TYPE_SMS_CDMA)
 
-
-static bdaddr_t adapter_addr;
-
-static const uint8_t zero_uuid[16] = { 0 };
-
-/* Simple list of RFCOMM server sockets */
-GList *servers = NULL;
-
-/* Simple list of RFCOMM connected sockets */
-GList *connections = NULL;
-
 struct rfcomm_sock {
-	int fd;		/* descriptor for communication with Java framework */
-	int real_sock;	/* real RFCOMM socket */
 	int channel;	/* RFCOMM channel */
+	BtIOSecLevel sec_level;
 
-	guint rfcomm_watch;
-	guint stack_watch;
+	/* for socket to BT */
+	int bt_sock;
+	guint bt_watch;
+
+	/* for socket to HAL */
+	int jv_sock;
+	guint jv_watch;
 
 	bdaddr_t dst;
 	uint32_t service_handle;
 
 	uint8_t *buf;
 	int buf_size;
-
-	const struct profile_info *profile;
 };
+
+struct rfcomm_channel {
+	bool reserved;
+	struct rfcomm_sock *rfsock;
+};
+
+static bdaddr_t adapter_addr;
+
+static const uint8_t zero_uuid[16] = { 0 };
+
+/* Simple list of RFCOMM connected sockets */
+static GList *connections = NULL;
+
+static struct rfcomm_channel servers[RFCOMM_CHANNEL_MAX + 1];
 
 static int rfsock_set_buffer(struct rfcomm_sock *rfsock)
 {
 	socklen_t len = sizeof(int);
 	int rcv, snd, size, err;
 
-	err = getsockopt(rfsock->real_sock, SOL_SOCKET, SO_RCVBUF, &rcv, &len);
+	err = getsockopt(rfsock->bt_sock, SOL_SOCKET, SO_RCVBUF, &rcv, &len);
 	if (err < 0) {
 		error("getsockopt(SO_RCVBUF): %s", strerror(errno));
 		return -errno;
 	}
 
-	err = getsockopt(rfsock->real_sock, SOL_SOCKET, SO_SNDBUF, &snd, &len);
+	err = getsockopt(rfsock->bt_sock, SOL_SOCKET, SO_SNDBUF, &snd, &len);
 	if (err < 0) {
 		error("getsockopt(SO_SNDBUF): %s", strerror(errno));
 		return -errno;
@@ -118,25 +124,25 @@ static void cleanup_rfsock(gpointer data)
 {
 	struct rfcomm_sock *rfsock = data;
 
-	DBG("rfsock: %p fd %d real_sock %d chan %u",
-		rfsock, rfsock->fd, rfsock->real_sock, rfsock->channel);
+	DBG("rfsock %p bt_sock %d jv_sock %d", rfsock, rfsock->bt_sock,
+							rfsock->jv_sock);
 
-	if (rfsock->fd >= 0)
-		if (close(rfsock->fd) < 0)
-			error("close() fd %d failed: %s", rfsock->fd,
+	if (rfsock->jv_sock >= 0)
+		if (close(rfsock->jv_sock) < 0)
+			error("close() fd %d failed: %s", rfsock->jv_sock,
 							strerror(errno));
 
-	if (rfsock->real_sock >= 0)
-		if (close(rfsock->real_sock) < 0)
-			error("close() fd %d: failed: %s", rfsock->real_sock,
+	if (rfsock->bt_sock >= 0)
+		if (close(rfsock->bt_sock) < 0)
+			error("close() fd %d: failed: %s", rfsock->bt_sock,
 							strerror(errno));
 
-	if (rfsock->rfcomm_watch > 0)
-		if (!g_source_remove(rfsock->rfcomm_watch))
-			error("rfcomm_watch source was not found");
+	if (rfsock->bt_watch > 0)
+		if (!g_source_remove(rfsock->bt_watch))
+			error("bt_watch source was not found");
 
-	if (rfsock->stack_watch > 0)
-		if (!g_source_remove(rfsock->stack_watch))
+	if (rfsock->jv_watch > 0)
+		if (!g_source_remove(rfsock->jv_watch))
 			error("stack_watch source was not found");
 
 	if (rfsock->service_handle)
@@ -148,23 +154,25 @@ static void cleanup_rfsock(gpointer data)
 	g_free(rfsock);
 }
 
-static struct rfcomm_sock *create_rfsock(int sock, int *hal_fd)
+static struct rfcomm_sock *create_rfsock(int bt_sock, int *hal_sock)
 {
 	int fds[2] = {-1, -1};
 	struct rfcomm_sock *rfsock;
 
 	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) < 0) {
 		error("socketpair(): %s", strerror(errno));
-		*hal_fd = -1;
+		*hal_sock = -1;
 		return NULL;
 	}
 
 	rfsock = g_new0(struct rfcomm_sock, 1);
-	rfsock->fd = fds[0];
-	*hal_fd = fds[1];
-	rfsock->real_sock = sock;
+	rfsock->jv_sock = fds[0];
+	*hal_sock = fds[1];
+	rfsock->bt_sock = bt_sock;
 
-	if (sock < 0)
+	DBG("rfsock %p", rfsock);
+
+	if (bt_sock < 0)
 		return rfsock;
 
 	if (rfsock_set_buffer(rfsock) < 0) {
@@ -175,18 +183,14 @@ static struct rfcomm_sock *create_rfsock(int sock, int *hal_fd)
 	return rfsock;
 }
 
-static sdp_record_t *create_opp_record(uint8_t chan, const char *svc_name)
+static sdp_record_t *create_rfcomm_record(uint8_t chan, uuid_t *uuid,
+						const char *svc_name,
+						bool has_obex)
 {
-	const char *service_name = "OBEX Object Push";
-	sdp_list_t *svclass_id, *pfseq, *apseq, *root;
-	uuid_t root_uuid, opush_uuid, l2cap_uuid, rfcomm_uuid, obex_uuid;
-	sdp_profile_desc_t profile[1];
-	sdp_list_t *aproto, *proto[3];
-	uint8_t formats[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0xff };
-	void *dtds[sizeof(formats)], *values[sizeof(formats)];
-	unsigned int i;
-	uint8_t dtd = SDP_UINT8;
-	sdp_data_t *sflist;
+	sdp_list_t *svclass_id;
+	sdp_list_t *seq, *proto_seq, *pbg_seq;
+	sdp_list_t *proto[3];
+	uuid_t l2cap_uuid, rfcomm_uuid, obex_uuid, pbg_uuid;
 	sdp_data_t *channel;
 	sdp_record_t *record;
 
@@ -196,266 +200,165 @@ static sdp_record_t *create_opp_record(uint8_t chan, const char *svc_name)
 
 	record->handle =  sdp_next_handle();
 
-	sdp_uuid16_create(&root_uuid, PUBLIC_BROWSE_GROUP);
-	root = sdp_list_append(NULL, &root_uuid);
-	sdp_set_browse_groups(record, root);
-
-	sdp_uuid16_create(&opush_uuid, OBEX_OBJPUSH_SVCLASS_ID);
-	svclass_id = sdp_list_append(NULL, &opush_uuid);
+	svclass_id = sdp_list_append(NULL, uuid);
 	sdp_set_service_classes(record, svclass_id);
-
-	sdp_uuid16_create(&profile[0].uuid, OBEX_OBJPUSH_PROFILE_ID);
-	profile[0].version = 0x0100;
-	pfseq = sdp_list_append(NULL, profile);
-	sdp_set_profile_descs(record, pfseq);
 
 	sdp_uuid16_create(&l2cap_uuid, L2CAP_UUID);
 	proto[0] = sdp_list_append(NULL, &l2cap_uuid);
-	apseq = sdp_list_append(NULL, proto[0]);
+	seq = sdp_list_append(NULL, proto[0]);
 
 	sdp_uuid16_create(&rfcomm_uuid, RFCOMM_UUID);
 	proto[1] = sdp_list_append(NULL, &rfcomm_uuid);
 	channel = sdp_data_alloc(SDP_UINT8, &chan);
 	proto[1] = sdp_list_append(proto[1], channel);
-	apseq = sdp_list_append(apseq, proto[1]);
+	seq = sdp_list_append(seq, proto[1]);
 
-	sdp_uuid16_create(&obex_uuid, OBEX_UUID);
-	proto[2] = sdp_list_append(NULL, &obex_uuid);
-	apseq = sdp_list_append(apseq, proto[2]);
+	if (has_obex) {
+		sdp_uuid16_create(&obex_uuid, OBEX_UUID);
+		proto[2] = sdp_list_append(NULL, &obex_uuid);
+		seq = sdp_list_append(seq, proto[2]);
+	}
 
-	aproto = sdp_list_append(NULL, apseq);
-	sdp_set_access_protos(record, aproto);
+	proto_seq = sdp_list_append(NULL, seq);
+	sdp_set_access_protos(record, proto_seq);
+
+	sdp_uuid16_create(&pbg_uuid, PUBLIC_BROWSE_GROUP);
+	pbg_seq = sdp_list_append(NULL, &pbg_uuid);
+	sdp_set_browse_groups(record, pbg_seq);
+
+	if (svc_name)
+		sdp_set_info_attr(record, svc_name, NULL, NULL);
+
+	sdp_data_free(channel);
+	sdp_list_free(proto[0], NULL);
+	sdp_list_free(proto[1], NULL);
+	if (has_obex)
+		sdp_list_free(proto[2], NULL);
+	sdp_list_free(seq, NULL);
+	sdp_list_free(proto_seq, NULL);
+	sdp_list_free(pbg_seq, NULL);
+	sdp_list_free(svclass_id, NULL);
+
+	return record;
+}
+
+static sdp_record_t *create_opp_record(uint8_t chan, const char *svc_name)
+{
+	uint8_t formats[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0xff };
+	uint8_t dtd = SDP_UINT8;
+	uuid_t uuid;
+	sdp_list_t *seq;
+	sdp_profile_desc_t profile[1];
+	void *dtds[sizeof(formats)], *values[sizeof(formats)];
+	sdp_data_t *formats_list;
+	sdp_record_t *record;
+	size_t i;
+
+	sdp_uuid16_create(&uuid, OBEX_OBJPUSH_SVCLASS_ID);
+
+	record = create_rfcomm_record(chan, &uuid, svc_name, true);
+	if (!record)
+		return NULL;
+
+	sdp_uuid16_create(&profile[0].uuid, OBEX_OBJPUSH_PROFILE_ID);
+	profile[0].version = 0x0100;
+	seq = sdp_list_append(NULL, profile);
+	sdp_set_profile_descs(record, seq);
 
 	for (i = 0; i < sizeof(formats); i++) {
 		dtds[i] = &dtd;
 		values[i] = &formats[i];
 	}
-	sflist = sdp_seq_alloc(dtds, values, sizeof(formats));
-	sdp_attr_add(record, SDP_ATTR_SUPPORTED_FORMATS_LIST, sflist);
+	formats_list = sdp_seq_alloc(dtds, values, sizeof(formats));
+	sdp_attr_add(record, SDP_ATTR_SUPPORTED_FORMATS_LIST, formats_list);
 
-	if (svc_name)
-		service_name = svc_name;
-
-	sdp_set_info_attr(record, service_name, NULL, NULL);
-
-	sdp_data_free(channel);
-	sdp_list_free(proto[0], NULL);
-	sdp_list_free(proto[1], NULL);
-	sdp_list_free(proto[2], NULL);
-	sdp_list_free(apseq, NULL);
-	sdp_list_free(pfseq, NULL);
-	sdp_list_free(aproto, NULL);
-	sdp_list_free(root, NULL);
-	sdp_list_free(svclass_id, NULL);
+	sdp_list_free(seq, NULL);
 
 	return record;
 }
 
 static sdp_record_t *create_pbap_record(uint8_t chan, const char *svc_name)
 {
-	const char *service_name = "OBEX Phonebook Access Server";
-	sdp_list_t *svclass_id, *pfseq, *apseq, *root;
-	uuid_t root_uuid, pbap_uuid, l2cap_uuid, rfcomm_uuid, obex_uuid;
+	sdp_list_t *seq;
 	sdp_profile_desc_t profile[1];
-	sdp_list_t *aproto, *proto[3];
-	sdp_data_t *channel;
-	uint8_t formats[] = { 0x01 };
-	uint8_t dtd = SDP_UINT8;
-	sdp_data_t *sflist;
+	uint8_t formats = 0x01;
 	sdp_record_t *record;
+	uuid_t uuid;
 
-	record = sdp_record_alloc();
+	sdp_uuid16_create(&uuid, PBAP_PSE_SVCLASS_ID);
+
+	record = create_rfcomm_record(chan, &uuid, svc_name, true);
 	if (!record)
 		return NULL;
 
-	record->handle =  sdp_next_handle();
-
-	sdp_uuid16_create(&root_uuid, PUBLIC_BROWSE_GROUP);
-	root = sdp_list_append(NULL, &root_uuid);
-	sdp_set_browse_groups(record, root);
-
-	sdp_uuid16_create(&pbap_uuid, PBAP_PSE_SVCLASS_ID);
-	svclass_id = sdp_list_append(NULL, &pbap_uuid);
-	sdp_set_service_classes(record, svclass_id);
-
 	sdp_uuid16_create(&profile[0].uuid, PBAP_PROFILE_ID);
-	profile[0].version = 0x0100;
-	pfseq = sdp_list_append(NULL, profile);
-	sdp_set_profile_descs(record, pfseq);
+	profile[0].version = 0x0101;
+	seq = sdp_list_append(NULL, profile);
+	sdp_set_profile_descs(record, seq);
 
-	sdp_uuid16_create(&l2cap_uuid, L2CAP_UUID);
-	proto[0] = sdp_list_append(NULL, &l2cap_uuid);
-	apseq = sdp_list_append(NULL, proto[0]);
+	sdp_attr_add_new(record, SDP_ATTR_SUPPORTED_REPOSITORIES, SDP_UINT8,
+								&formats);
 
-	sdp_uuid16_create(&rfcomm_uuid, RFCOMM_UUID);
-	proto[1] = sdp_list_append(NULL, &rfcomm_uuid);
-	channel = sdp_data_alloc(SDP_UINT8, &chan);
-	proto[1] = sdp_list_append(proto[1], channel);
-	apseq = sdp_list_append(apseq, proto[1]);
-
-	sdp_uuid16_create(&obex_uuid, OBEX_UUID);
-	proto[2] = sdp_list_append(NULL, &obex_uuid);
-	apseq = sdp_list_append(apseq, proto[2]);
-
-	aproto = sdp_list_append(NULL, apseq);
-	sdp_set_access_protos(record, aproto);
-
-	sflist = sdp_data_alloc(dtd, formats);
-	sdp_attr_add(record, SDP_ATTR_SUPPORTED_REPOSITORIES, sflist);
-
-	if (svc_name)
-		service_name = svc_name;
-
-	sdp_set_info_attr(record, service_name, NULL, NULL);
-
-	sdp_data_free(channel);
-	sdp_list_free(proto[0], NULL);
-	sdp_list_free(proto[1], NULL);
-	sdp_list_free(proto[2], NULL);
-	sdp_list_free(apseq, NULL);
-	sdp_list_free(pfseq, NULL);
-	sdp_list_free(aproto, NULL);
-	sdp_list_free(root, NULL);
-	sdp_list_free(svclass_id, NULL);
+	sdp_list_free(seq, NULL);
 
 	return record;
 }
 
 static sdp_record_t *create_mas_record(uint8_t chan, const char *svc_name)
 {
-	const char *service_name = "MAP MAS SMS";
-	sdp_list_t *svclass_id, *pfseq, *apseq, *root;
-	uuid_t root_uuid, mse_uuid, l2cap_uuid, rfcomm_uuid, obex_uuid;
+	sdp_list_t *seq;
 	sdp_profile_desc_t profile[1];
-	sdp_list_t *aproto, *proto[3];
-	sdp_data_t *channel;
 	uint8_t minst = DEFAULT_MAS_INSTANCE;
 	uint8_t mtype = DEFAULT_MAS_MSG_TYPE;
 	sdp_record_t *record;
+	uuid_t uuid;
 
-	record = sdp_record_alloc();
+	sdp_uuid16_create(&uuid, MAP_MSE_SVCLASS_ID);
+
+	record = create_rfcomm_record(chan, &uuid, svc_name, true);
 	if (!record)
 		return NULL;
 
-	record->handle =  sdp_next_handle();
-
-	sdp_uuid16_create(&root_uuid, PUBLIC_BROWSE_GROUP);
-	root = sdp_list_append(NULL, &root_uuid);
-	sdp_set_browse_groups(record, root);
-
-	sdp_uuid16_create(&mse_uuid, MAP_MSE_SVCLASS_ID);
-	svclass_id = sdp_list_append(NULL, &mse_uuid);
-	sdp_set_service_classes(record, svclass_id);
-
 	sdp_uuid16_create(&profile[0].uuid, MAP_PROFILE_ID);
 	profile[0].version = 0x0101;
-	pfseq = sdp_list_append(NULL, profile);
-	sdp_set_profile_descs(record, pfseq);
+	seq = sdp_list_append(NULL, profile);
+	sdp_set_profile_descs(record, seq);
 
 	sdp_attr_add_new(record, SDP_ATTR_MAS_INSTANCE_ID, SDP_UINT8, &minst);
 	sdp_attr_add_new(record, SDP_ATTR_SUPPORTED_MESSAGE_TYPES, SDP_UINT8,
 									&mtype);
 
-	sdp_uuid16_create(&l2cap_uuid, L2CAP_UUID);
-	proto[0] = sdp_list_append(NULL, &l2cap_uuid);
-	apseq = sdp_list_append(NULL, proto[0]);
-
-	sdp_uuid16_create(&rfcomm_uuid, RFCOMM_UUID);
-	proto[1] = sdp_list_append(NULL, &rfcomm_uuid);
-	channel = sdp_data_alloc(SDP_UINT8, &chan);
-	proto[1] = sdp_list_append(proto[1], channel);
-	apseq = sdp_list_append(apseq, proto[1]);
-
-	sdp_uuid16_create(&obex_uuid, OBEX_UUID);
-	proto[2] = sdp_list_append(NULL, &obex_uuid);
-	apseq = sdp_list_append(apseq, proto[2]);
-
-	aproto = sdp_list_append(NULL, apseq);
-	sdp_set_access_protos(record, aproto);
-
-	if (svc_name)
-		service_name = svc_name;
-
-	sdp_set_info_attr(record, service_name, NULL, NULL);
-
-	sdp_data_free(channel);
-	sdp_list_free(proto[0], NULL);
-	sdp_list_free(proto[1], NULL);
-	sdp_list_free(proto[2], NULL);
-	sdp_list_free(apseq, NULL);
-	sdp_list_free(pfseq, NULL);
-	sdp_list_free(aproto, NULL);
-	sdp_list_free(root, NULL);
-	sdp_list_free(svclass_id, NULL);
+	sdp_list_free(seq, NULL);
 
 	return record;
 }
 
 static sdp_record_t *create_spp_record(uint8_t chan, const char *svc_name)
 {
-	const char *service_name = "Serial Port";
-	sdp_list_t *svclass_id, *apseq, *profiles, *root;
-	uuid_t root_uuid, sp_uuid, l2cap, rfcomm;
-	sdp_profile_desc_t profile;
-	sdp_list_t *aproto, *proto[2];
-	sdp_data_t *channel;
 	sdp_record_t *record;
+	uuid_t uuid;
 
-	record = sdp_record_alloc();
+	sdp_uuid16_create(&uuid, SERIAL_PORT_SVCLASS_ID);
+
+	record = create_rfcomm_record(chan, &uuid, svc_name, false);
 	if (!record)
 		return NULL;
 
-	record->handle =  sdp_next_handle();
+	return record;
+}
 
-	sdp_uuid16_create(&root_uuid, PUBLIC_BROWSE_GROUP);
-	root = sdp_list_append(NULL, &root_uuid);
-	sdp_set_browse_groups(record, root);
+static sdp_record_t *create_app_record(uint8_t chan,
+						const uint8_t *app_uuid,
+						const char *svc_name)
+{
+	sdp_record_t *record;
+	uuid_t uuid;
 
-	sdp_uuid16_create(&sp_uuid, SERIAL_PORT_SVCLASS_ID);
-	svclass_id = sdp_list_append(NULL, &sp_uuid);
-	sdp_set_service_classes(record, svclass_id);
+	sdp_uuid128_create(&uuid, app_uuid);
 
-	sdp_uuid16_create(&profile.uuid, SERIAL_PORT_PROFILE_ID);
-	profile.version = 0x0100;
-	profiles = sdp_list_append(NULL, &profile);
-	sdp_set_profile_descs(record, profiles);
-
-	sdp_uuid16_create(&l2cap, L2CAP_UUID);
-	proto[0] = sdp_list_append(NULL, &l2cap);
-	apseq = sdp_list_append(NULL, proto[0]);
-
-	sdp_uuid16_create(&rfcomm, RFCOMM_UUID);
-	proto[1] = sdp_list_append(NULL, &rfcomm);
-	channel = sdp_data_alloc(SDP_UINT8, &chan);
-	proto[1] = sdp_list_append(proto[1], channel);
-	apseq = sdp_list_append(apseq, proto[1]);
-
-	aproto = sdp_list_append(NULL, apseq);
-	sdp_set_access_protos(record, aproto);
-
-	sdp_add_lang_attr(record);
-
-	if (svc_name)
-		service_name = svc_name;
-
-	sdp_set_info_attr(record, service_name, "BlueZ", "COM Port");
-
-	sdp_set_url_attr(record, "http://www.bluez.org/",
-			"http://www.bluez.org/", "http://www.bluez.org/");
-
-	sdp_set_service_id(record, sp_uuid);
-	sdp_set_service_ttl(record, 0xffff);
-	sdp_set_service_avail(record, 0xff);
-	sdp_set_record_state(record, 0x00001234);
-
-	sdp_data_free(channel);
-	sdp_list_free(proto[0], NULL);
-	sdp_list_free(proto[1], NULL);
-	sdp_list_free(apseq, NULL);
-	sdp_list_free(aproto, NULL);
-	sdp_list_free(root, NULL);
-	sdp_list_free(svclass_id, NULL);
-	sdp_list_free(profiles, NULL);
+	record = create_rfcomm_record(chan, &uuid, svc_name, false);
+	if (!record)
+		return NULL;
 
 	return record;
 }
@@ -468,6 +371,15 @@ static const struct profile_info {
 	sdp_record_t *	(*create_record)(uint8_t chan, const char *svc_name);
 } profiles[] = {
 	{
+		.uuid = {
+			0x00, 0x00, 0x11, 0x1F, 0x00, 0x00, 0x10, 0x00,
+			0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB
+		},
+		.channel = HFAG_DEFAULT_CHANNEL,
+		.svc_hint = 0,
+		.sec_level = BT_IO_SEC_MEDIUM,
+		.create_record = NULL
+	}, {
 		.uuid = {
 			0x00, 0x00, 0x11, 0x2F, 0x00, 0x00, 0x10, 0x00,
 			0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB
@@ -490,7 +402,7 @@ static const struct profile_info {
 			0x00, 0x00, 0x11, 0x32, 0x00, 0x00, 0x10, 0x00,
 			0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB
 		},
-		.channel = MAS_DEFAULT_CHANNEL,
+		.channel = 0,
 		.svc_hint = SVC_HINT_OBEX,
 		.sec_level = BT_IO_SEC_MEDIUM,
 		.create_record = create_mas_record
@@ -499,26 +411,31 @@ static const struct profile_info {
 			0x00, 0x00, 0x11, 0x01, 0x00, 0x00, 0x10, 0x00,
 			0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB
 		},
-		.channel = SPP_DEFAULT_CHANNEL,
+		.channel = 0,
 		.svc_hint = 0,
 		.sec_level = BT_IO_SEC_MEDIUM,
 		.create_record = create_spp_record
 	},
 };
 
-static uint32_t sdp_service_register(const struct profile_info *profile,
-							const void *svc_name)
+static uint32_t sdp_service_register(uint8_t channel, const uint8_t *uuid,
+					const struct profile_info *profile,
+					const void *svc_name)
 {
-	sdp_record_t *record;
+	sdp_record_t *record = NULL;
+	uint8_t svc_hint = 0;
 
-	if (!profile || !profile->create_record)
-		return 0;
+	if (profile && profile->create_record) {
+		record = profile->create_record(channel, svc_name);
+		svc_hint = profile->svc_hint;
+	} else if (uuid) {
+		record = create_app_record(channel, uuid, svc_name);
+	}
 
-	record = profile->create_record(profile->channel, svc_name);
 	if (!record)
 		return 0;
 
-	if (bt_adapter_add_record(record, profile->svc_hint) < 0) {
+	if (bt_adapter_add_record(record, svc_hint) < 0) {
 		error("Failed to register on SDP record");
 		sdp_record_free(record);
 		return 0;
@@ -604,7 +521,7 @@ static int try_write_all(int fd, unsigned char *buf, int len)
 	return sent;
 }
 
-static gboolean sock_stack_event_cb(GIOChannel *io, GIOCondition cond,
+static gboolean jv_sock_client_event_cb(GIOChannel *io, GIOCondition cond,
 								gpointer data)
 {
 	struct rfcomm_sock *rfsock = data;
@@ -616,19 +533,18 @@ static gboolean sock_stack_event_cb(GIOChannel *io, GIOCondition cond,
 	}
 
 	if (cond & (G_IO_ERR | G_IO_NVAL)) {
-		error("Socket error: sock %d cond %d",
-					g_io_channel_unix_get_fd(io), cond);
+		error("Socket %d error", g_io_channel_unix_get_fd(io));
 		goto fail;
 	}
 
-	len = read(rfsock->fd, rfsock->buf, rfsock->buf_size);
+	len = read(rfsock->jv_sock, rfsock->buf, rfsock->buf_size);
 	if (len <= 0) {
 		error("read(): %s", strerror(errno));
 		/* Read again */
 		return TRUE;
 	}
 
-	sent = try_write_all(rfsock->real_sock, rfsock->buf, len);
+	sent = try_write_all(rfsock->bt_sock, rfsock->buf, len);
 	if (sent < 0) {
 		error("write(): %s", strerror(errno));
 		goto fail;
@@ -636,13 +552,15 @@ static gboolean sock_stack_event_cb(GIOChannel *io, GIOCondition cond,
 
 	return TRUE;
 fail:
+	DBG("rfsock %p jv_sock %d cond %d", rfsock, rfsock->jv_sock, cond);
+
 	connections = g_list_remove(connections, rfsock);
 	cleanup_rfsock(rfsock);
 
 	return FALSE;
 }
 
-static gboolean sock_rfcomm_event_cb(GIOChannel *io, GIOCondition cond,
+static gboolean bt_sock_event_cb(GIOChannel *io, GIOCondition cond,
 								gpointer data)
 {
 	struct rfcomm_sock *rfsock = data;
@@ -654,19 +572,18 @@ static gboolean sock_rfcomm_event_cb(GIOChannel *io, GIOCondition cond,
 	}
 
 	if (cond & (G_IO_ERR | G_IO_NVAL)) {
-		error("Socket error: sock %d cond %d",
-					g_io_channel_unix_get_fd(io), cond);
+		error("Socket %d error", g_io_channel_unix_get_fd(io));
 		goto fail;
 	}
 
-	len = read(rfsock->real_sock, rfsock->buf, rfsock->buf_size);
+	len = read(rfsock->bt_sock, rfsock->buf, rfsock->buf_size);
 	if (len <= 0) {
 		error("read(): %s", strerror(errno));
 		/* Read again */
 		return TRUE;
 	}
 
-	sent = try_write_all(rfsock->fd, rfsock->buf, len);
+	sent = try_write_all(rfsock->jv_sock, rfsock->buf, len);
 	if (sent < 0) {
 		error("write(): %s", strerror(errno));
 		goto fail;
@@ -674,6 +591,8 @@ static gboolean sock_rfcomm_event_cb(GIOChannel *io, GIOCondition cond,
 
 	return TRUE;
 fail:
+	DBG("rfsock %p bt_sock %d cond %d", rfsock, rfsock->bt_sock, cond);
+
 	connections = g_list_remove(connections, rfsock);
 	cleanup_rfsock(rfsock);
 
@@ -693,7 +612,7 @@ static bool sock_send_accept(struct rfcomm_sock *rfsock, bdaddr_t *bdaddr,
 	cmd.channel = rfsock->channel;
 	cmd.status = 0;
 
-	len = bt_sock_send_fd(rfsock->fd, &cmd, sizeof(cmd), fd_accepted);
+	len = bt_sock_send_fd(rfsock->jv_sock, &cmd, sizeof(cmd), fd_accepted);
 	if (len != sizeof(cmd)) {
 		error("Error sending accept signal");
 		return false;
@@ -702,18 +621,18 @@ static bool sock_send_accept(struct rfcomm_sock *rfsock, bdaddr_t *bdaddr,
 	return true;
 }
 
-static gboolean sock_server_stack_event_cb(GIOChannel *io, GIOCondition cond,
+static gboolean jv_sock_server_event_cb(GIOChannel *io, GIOCondition cond,
 								gpointer data)
 {
 	struct rfcomm_sock *rfsock = data;
 
-	DBG("sock %d cond %d", g_io_channel_unix_get_fd(io), cond);
+	DBG("rfsock %p jv_sock %d cond %d", rfsock, rfsock->jv_sock, cond);
 
 	if (cond & G_IO_NVAL)
 		return FALSE;
 
 	if (cond & (G_IO_ERR | G_IO_HUP )) {
-		servers = g_list_remove(servers, rfsock);
+		servers[rfsock->channel].rfsock = NULL;
 		cleanup_rfsock(rfsock);
 	}
 
@@ -723,13 +642,13 @@ static gboolean sock_server_stack_event_cb(GIOChannel *io, GIOCondition cond,
 static void accept_cb(GIOChannel *io, GError *err, gpointer user_data)
 {
 	struct rfcomm_sock *rfsock = user_data;
-	struct rfcomm_sock *rfsock_acc;
-	GIOChannel *io_stack;
+	struct rfcomm_sock *new_rfsock;
+	GIOChannel *jv_io;
 	GError *gerr = NULL;
 	bdaddr_t dst;
 	char address[18];
-	int sock_acc;
-	int hal_fd;
+	int new_sock;
+	int hal_sock;
 	guint id;
 	GIOCondition cond;
 
@@ -749,80 +668,126 @@ static void accept_cb(GIOChannel *io, GError *err, gpointer user_data)
 	}
 
 	ba2str(&dst, address);
-	DBG("Incoming connection from %s rfsock %p", address, rfsock);
+	DBG("Incoming connection from %s on channel %d (rfsock %p)", address,
+						rfsock->channel, rfsock);
 
-	sock_acc = g_io_channel_unix_get_fd(io);
-	rfsock_acc = create_rfsock(sock_acc, &hal_fd);
-	if (!rfsock_acc) {
+	new_sock = g_io_channel_unix_get_fd(io);
+	new_rfsock = create_rfsock(new_sock, &hal_sock);
+	if (!new_rfsock) {
 		g_io_channel_shutdown(io, TRUE, NULL);
 		return;
 	}
 
-	DBG("rfsock: fd %d real_sock %d chan %u sock %d",
-		rfsock->fd, rfsock->real_sock, rfsock->channel,
-		sock_acc);
+	DBG("new rfsock %p bt_sock %d jv_sock %d hal_sock %d", new_rfsock,
+			new_rfsock->bt_sock, new_rfsock->jv_sock, hal_sock);
 
-	if (!sock_send_accept(rfsock, &dst, hal_fd)) {
-		cleanup_rfsock(rfsock_acc);
+	if (!sock_send_accept(rfsock, &dst, hal_sock)) {
+		cleanup_rfsock(new_rfsock);
 		return;
 	}
 
-	connections = g_list_append(connections, rfsock_acc);
+	connections = g_list_append(connections, new_rfsock);
 
 	/* Handle events from Android */
 	cond = G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_NVAL;
-	io_stack = g_io_channel_unix_new(rfsock_acc->fd);
-	id = g_io_add_watch(io_stack, cond, sock_stack_event_cb, rfsock_acc);
-	g_io_channel_unref(io_stack);
+	jv_io = g_io_channel_unix_new(new_rfsock->jv_sock);
+	id = g_io_add_watch(jv_io, cond, jv_sock_client_event_cb, new_rfsock);
+	g_io_channel_unref(jv_io);
 
-	rfsock_acc->stack_watch = id;
+	new_rfsock->jv_watch = id;
 
 	/* Handle rfcomm events */
 	cond = G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_NVAL;
-	id = g_io_add_watch(io, cond, sock_rfcomm_event_cb, rfsock_acc);
+	id = g_io_add_watch(io, cond, bt_sock_event_cb, new_rfsock);
 	g_io_channel_set_close_on_unref(io, FALSE);
 
-	rfsock_acc->rfcomm_watch = id;
+	new_rfsock->bt_watch = id;
+}
 
-	DBG("rfsock %p rfsock_acc %p stack_watch %d rfcomm_watch %d",
-		rfsock, rfsock_acc, rfsock_acc->stack_watch,
-		rfsock_acc->rfcomm_watch);
+static int find_free_channel(void)
+{
+	int ch;
+
+	/* channel 0 is reserver so we don't use it */
+	for (ch = 1; ch <= RFCOMM_CHANNEL_MAX; ch++) {
+		struct rfcomm_channel *srv = &servers[ch];
+
+		if (!srv->reserved && srv->rfsock == NULL)
+			return ch;
+	}
+
+	return 0;
+}
+
+static BtIOSecLevel get_sec_level(uint8_t flags)
+{
+	/* HAL_SOCK_FLAG_AUTH should require MITM but in our case setting
+	 * security to BT_IO_SEC_HIGH would also require 16-digits PIN code
+	 * for pre-2.1 devices which is not what Android expects. For this
+	 * reason we ignore this flag to not break apps which use "secure"
+	 * sockets (have both auth and encrypt flags set, there is no public
+	 * API in Android which should provide proper high security socket).
+	 */
+	return flags & HAL_SOCK_FLAG_ENCRYPT ? BT_IO_SEC_MEDIUM :
+							BT_IO_SEC_LOW;
 }
 
 static uint8_t rfcomm_listen(int chan, const uint8_t *name, const uint8_t *uuid,
-						uint8_t flags, int *hal_fd)
+						uint8_t flags, int *hal_sock)
 {
 	const struct profile_info *profile;
 	struct rfcomm_sock *rfsock = NULL;
 	BtIOSecLevel sec_level;
-	GIOChannel *io, *io_stack;
+	GIOChannel *io, *jv_io;
 	GIOCondition cond;
 	GError *err = NULL;
 	guint id;
+	uuid_t uu;
+	char uuid_str[32];
 
-	DBG("");
+	sdp_uuid128_create(&uu, uuid);
+	sdp_uuid2strn(&uu, uuid_str, sizeof(uuid_str));
 
-	if (!memcmp(uuid, zero_uuid, sizeof(zero_uuid)) && chan <= 0) {
+	DBG("chan %d flags 0x%02x uuid %s name %s", chan, flags, uuid_str,
+									name);
+
+	if ((!memcmp(uuid, zero_uuid, sizeof(zero_uuid)) && chan <= 0) ||
+			(chan > RFCOMM_CHANNEL_MAX)) {
 		error("Invalid rfcomm listen params");
 		return HAL_STATUS_INVALID;
 	}
 
 	profile = get_profile_by_uuid(uuid);
 	if (!profile) {
-		if (chan <= 0)
+		sec_level = get_sec_level(flags);
+	} else {
+		if (!profile->create_record)
 			return HAL_STATUS_INVALID;
 
-		sec_level = BT_IO_SEC_MEDIUM;
-	} else {
 		chan = profile->channel;
 		sec_level = profile->sec_level;
 	}
 
-	DBG("rfcomm channel %d svc_name %s", chan, name);
+	if (chan <= 0)
+		chan = find_free_channel();
 
-	rfsock = create_rfsock(-1, hal_fd);
+	if (!chan) {
+		error("No free channels");
+		return HAL_STATUS_BUSY;
+	}
+
+	if (servers[chan].rfsock != NULL) {
+		error("Channel already registered (%d)", chan);
+		return HAL_STATUS_BUSY;
+	}
+
+	DBG("chan %d sec_level %d", chan, sec_level);
+
+	rfsock = create_rfsock(-1, hal_sock);
 	if (!rfsock)
 		return HAL_STATUS_FAILED;
+
+	rfsock->channel = chan;
 
 	io = bt_io_listen(accept_cb, NULL, rfsock, NULL, &err,
 				BT_IO_OPT_SOURCE_BDADDR, &adapter_addr,
@@ -835,52 +800,55 @@ static uint8_t rfcomm_listen(int chan, const uint8_t *name, const uint8_t *uuid,
 		goto failed;
 	}
 
-	rfsock->real_sock = g_io_channel_unix_get_fd(io);
+	rfsock->bt_sock = g_io_channel_unix_get_fd(io);
 
 	g_io_channel_set_close_on_unref(io, FALSE);
 	g_io_channel_unref(io);
 
 	/* Handle events from Android */
 	cond = G_IO_HUP | G_IO_ERR | G_IO_NVAL;
-	io_stack = g_io_channel_unix_new(rfsock->fd);
-	id = g_io_add_watch_full(io_stack, G_PRIORITY_HIGH, cond,
-					sock_server_stack_event_cb, rfsock,
+	jv_io = g_io_channel_unix_new(rfsock->jv_sock);
+	id = g_io_add_watch_full(jv_io, G_PRIORITY_HIGH, cond,
+					jv_sock_server_event_cb, rfsock,
 					NULL);
-	g_io_channel_unref(io_stack);
+	g_io_channel_unref(jv_io);
 
-	rfsock->stack_watch = id;
+	rfsock->jv_watch = id;
 
-	DBG("real_sock %d fd %d hal_fd %d", rfsock->real_sock, rfsock->fd,
-								*hal_fd);
+	DBG("rfsock %p bt_sock %d jv_sock %d hal_sock %d", rfsock,
+								rfsock->bt_sock,
+								rfsock->jv_sock,
+								*hal_sock);
 
-	if (write(rfsock->fd, &chan, sizeof(chan)) != sizeof(chan)) {
+	if (write(rfsock->jv_sock, &chan, sizeof(chan)) != sizeof(chan)) {
 		error("Error sending RFCOMM channel");
 		goto failed;
 	}
 
-	rfsock->service_handle = sdp_service_register(profile, name);
+	rfsock->service_handle = sdp_service_register(chan, uuid, profile,
+									name);
 
-	servers = g_list_append(servers, rfsock);
+	servers[chan].rfsock = rfsock;
 
 	return HAL_STATUS_SUCCESS;
 
 failed:
 
 	cleanup_rfsock(rfsock);
-	close(*hal_fd);
+	close(*hal_sock);
 	return HAL_STATUS_FAILED;
 }
 
 static void handle_listen(const void *buf, uint16_t len)
 {
-	const struct hal_cmd_sock_listen *cmd = buf;
+	const struct hal_cmd_socket_listen *cmd = buf;
 	uint8_t status;
-	int hal_fd;
+	int hal_sock;
 
 	switch (cmd->type) {
 	case HAL_SOCK_RFCOMM:
 		status = rfcomm_listen(cmd->channel, cmd->name, cmd->uuid,
-							cmd->flags, &hal_fd);
+							cmd->flags, &hal_sock);
 		break;
 	case HAL_SOCK_SCO:
 	case HAL_SOCK_L2CAP:
@@ -894,13 +862,13 @@ static void handle_listen(const void *buf, uint16_t len)
 	if (status != HAL_STATUS_SUCCESS)
 		goto failed;
 
-	ipc_send_rsp_full(HAL_SERVICE_ID_SOCK, HAL_OP_SOCK_LISTEN, 0, NULL,
-									hal_fd);
-	close(hal_fd);
+	ipc_send_rsp_full(HAL_SERVICE_ID_SOCK, HAL_OP_SOCKET_LISTEN, 0, NULL,
+								hal_sock);
+	close(hal_sock);
 	return ;
 
 failed:
-	ipc_send_rsp(HAL_SERVICE_ID_SOCK, HAL_OP_SOCK_LISTEN, status);
+	ipc_send_rsp(HAL_SERVICE_ID_SOCK, HAL_OP_SOCKET_LISTEN, status);
 }
 
 static bool sock_send_connect(struct rfcomm_sock *rfsock, bdaddr_t *bdaddr)
@@ -916,7 +884,7 @@ static bool sock_send_connect(struct rfcomm_sock *rfsock, bdaddr_t *bdaddr)
 	cmd.channel = rfsock->channel;
 	cmd.status = 0;
 
-	len = write(rfsock->fd, &cmd, sizeof(cmd));
+	len = write(rfsock->jv_sock, &cmd, sizeof(cmd));
 	if (len < 0) {
 		error("%s", strerror(errno));
 		return false;
@@ -934,7 +902,7 @@ static void connect_cb(GIOChannel *io, GError *err, gpointer user_data)
 {
 	struct rfcomm_sock *rfsock = user_data;
 	bdaddr_t *dst = &rfsock->dst;
-	GIOChannel *io_stack;
+	GIOChannel *jv_io;
 	char address[18];
 	guint id;
 	GIOCondition cond;
@@ -945,29 +913,26 @@ static void connect_cb(GIOChannel *io, GError *err, gpointer user_data)
 	}
 
 	ba2str(dst, address);
-	DBG("Connected to %s", address);
-
-	DBG("rfsock: fd %d real_sock %d chan %u sock %d",
-		rfsock->fd, rfsock->real_sock, rfsock->channel,
-		g_io_channel_unix_get_fd(io));
+	DBG("Connected to %s on channel %d (rfsock %p)", address,
+						rfsock->channel, rfsock);
 
 	if (!sock_send_connect(rfsock, dst))
 		goto fail;
 
 	/* Handle events from Android */
 	cond = G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_NVAL;
-	io_stack = g_io_channel_unix_new(rfsock->fd);
-	id = g_io_add_watch(io_stack, cond, sock_stack_event_cb, rfsock);
-	g_io_channel_unref(io_stack);
+	jv_io = g_io_channel_unix_new(rfsock->jv_sock);
+	id = g_io_add_watch(jv_io, cond, jv_sock_client_event_cb, rfsock);
+	g_io_channel_unref(jv_io);
 
-	rfsock->stack_watch = id;
+	rfsock->jv_watch = id;
 
 	/* Handle rfcomm events */
 	cond = G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL;
-	id = g_io_add_watch(io, cond, sock_rfcomm_event_cb, rfsock);
+	id = g_io_add_watch(io, cond, bt_sock_event_cb, rfsock);
 	g_io_channel_set_close_on_unref(io, FALSE);
 
-	rfsock->rfcomm_watch = id;
+	rfsock->bt_watch = id;
 
 	return;
 fail:
@@ -977,18 +942,16 @@ fail:
 
 static bool do_rfcomm_connect(struct rfcomm_sock *rfsock, int chan)
 {
-	BtIOSecLevel sec_level = BT_IO_SEC_MEDIUM;
 	GIOChannel *io;
 	GError *gerr = NULL;
 
-	if (rfsock->profile)
-		sec_level = rfsock->profile->sec_level;
+	DBG("rfsock %p sec_level %d chan %d", rfsock, rfsock->sec_level, chan);
 
 	io = bt_io_connect(connect_cb, rfsock, NULL, &gerr,
 				BT_IO_OPT_SOURCE_BDADDR, &adapter_addr,
 				BT_IO_OPT_DEST_BDADDR, &rfsock->dst,
 				BT_IO_OPT_CHANNEL, chan,
-				BT_IO_OPT_SEC_LEVEL, sec_level,
+				BT_IO_OPT_SEC_LEVEL, rfsock->sec_level,
 				BT_IO_OPT_INVALID);
 	if (!io) {
 		error("Failed connect: %s", gerr->message);
@@ -999,12 +962,12 @@ static bool do_rfcomm_connect(struct rfcomm_sock *rfsock, int chan)
 	g_io_channel_set_close_on_unref(io, FALSE);
 	g_io_channel_unref(io);
 
-	if (write(rfsock->fd, &chan, sizeof(chan)) != sizeof(chan)) {
+	if (write(rfsock->jv_sock, &chan, sizeof(chan)) != sizeof(chan)) {
 		error("Error sending RFCOMM channel");
 		return false;
 	}
 
-	rfsock->real_sock = g_io_channel_unix_get_fd(io);
+	rfsock->bt_sock = g_io_channel_unix_get_fd(io);
 	rfsock_set_buffer(rfsock);
 	rfsock->channel = chan;
 	connections = g_list_append(connections, rfsock);
@@ -1063,10 +1026,20 @@ fail:
 }
 
 static uint8_t connect_rfcomm(const bdaddr_t *addr, int chan,
-				const uint8_t *uuid, uint8_t flags, int *hal_fd)
+					const uint8_t *uuid, uint8_t flags,
+					int *hal_sock)
 {
 	struct rfcomm_sock *rfsock;
+	char address[18];
 	uuid_t uu;
+	char uuid_str[32];
+
+	sdp_uuid128_create(&uu, uuid);
+	sdp_uuid2strn(&uu, uuid_str, sizeof(uuid_str));
+	ba2str(addr, address);
+
+	DBG("addr %s chan %d flags 0x%02x uuid %s", address, chan, flags,
+								uuid_str);
 
 	if ((!memcmp(uuid, zero_uuid, sizeof(zero_uuid)) && chan <= 0) ||
 						!bacmp(addr, BDADDR_ANY)) {
@@ -1074,9 +1047,14 @@ static uint8_t connect_rfcomm(const bdaddr_t *addr, int chan,
 		return HAL_STATUS_INVALID;
 	}
 
-	rfsock = create_rfsock(-1, hal_fd);
+	rfsock = create_rfsock(-1, hal_sock);
 	if (!rfsock)
 		return HAL_STATUS_FAILED;
+
+	DBG("rfsock %p jv_sock %d hal_sock %d", rfsock, rfsock->jv_sock,
+							*hal_sock);
+
+	rfsock->sec_level = get_sec_level(flags);
 
 	bacpy(&rfsock->dst, addr);
 
@@ -1084,11 +1062,6 @@ static uint8_t connect_rfcomm(const bdaddr_t *addr, int chan,
 		if (!do_rfcomm_connect(rfsock, chan))
 			goto failed;
 	} else {
-		memset(&uu, 0, sizeof(uu));
-		uu.type = SDP_UUID128;
-		memcpy(&uu.value.uuid128, uuid, sizeof(uint128_t));
-
-		rfsock->profile = get_profile_by_uuid(uuid);
 
 		if (bt_search_service(&adapter_addr, &rfsock->dst, &uu,
 					sdp_search_cb, rfsock, NULL, 0) < 0) {
@@ -1101,16 +1074,16 @@ static uint8_t connect_rfcomm(const bdaddr_t *addr, int chan,
 
 failed:
 	cleanup_rfsock(rfsock);
-	close(*hal_fd);
+	close(*hal_sock);
 	return HAL_STATUS_FAILED;
 }
 
 static void handle_connect(const void *buf, uint16_t len)
 {
-	const struct hal_cmd_sock_connect *cmd = buf;
+	const struct hal_cmd_socket_connect *cmd = buf;
 	bdaddr_t bdaddr;
 	uint8_t status;
-	int hal_fd;
+	int hal_sock;
 
 	DBG("");
 
@@ -1119,7 +1092,7 @@ static void handle_connect(const void *buf, uint16_t len)
 	switch (cmd->type) {
 	case HAL_SOCK_RFCOMM:
 		status = connect_rfcomm(&bdaddr, cmd->channel, cmd->uuid,
-							cmd->flags, &hal_fd);
+							cmd->flags, &hal_sock);
 		break;
 	case HAL_SOCK_SCO:
 	case HAL_SOCK_L2CAP:
@@ -1133,26 +1106,35 @@ static void handle_connect(const void *buf, uint16_t len)
 	if (status != HAL_STATUS_SUCCESS)
 		goto failed;
 
-	ipc_send_rsp_full(HAL_SERVICE_ID_SOCK, HAL_OP_SOCK_CONNECT, 0, NULL,
-									hal_fd);
-	close(hal_fd);
+	ipc_send_rsp_full(HAL_SERVICE_ID_SOCK, HAL_OP_SOCKET_CONNECT, 0, NULL,
+								hal_sock);
+	close(hal_sock);
 	return;
 
 failed:
-	ipc_send_rsp(HAL_SERVICE_ID_SOCK, HAL_OP_SOCK_CONNECT, status);
+	ipc_send_rsp(HAL_SERVICE_ID_SOCK, HAL_OP_SOCKET_CONNECT, status);
 
 }
 
 static const struct ipc_handler cmd_handlers[] = {
-	/* HAL_OP_SOCK_LISTEN */
-	{ handle_listen, false, sizeof(struct hal_cmd_sock_listen) },
-	/* HAL_OP_SOCK_CONNECT */
-	{ handle_connect, false, sizeof(struct hal_cmd_sock_connect) },
+	/* HAL_OP_SOCKET_LISTEN */
+	{ handle_listen, false, sizeof(struct hal_cmd_socket_listen) },
+	/* HAL_OP_SOCKET_CONNECT */
+	{ handle_connect, false, sizeof(struct hal_cmd_socket_connect) },
 };
 
 void bt_socket_register(const bdaddr_t *addr)
 {
+	size_t i;
+
 	DBG("");
+
+	/* make sure channels assigned for profiles are reserved and not used
+	 * for app services
+	 */
+	for (i = 0; i < G_N_ELEMENTS(profiles); i++)
+		if (profiles[i].channel)
+			servers[profiles[i].channel].reserved = true;
 
 	bacpy(&adapter_addr, addr);
 	ipc_register(HAL_SERVICE_ID_SOCK, cmd_handlers,
@@ -1161,10 +1143,17 @@ void bt_socket_register(const bdaddr_t *addr)
 
 void bt_socket_unregister(void)
 {
+	int ch;
+
 	DBG("");
 
 	g_list_free_full(connections, cleanup_rfsock);
-	g_list_free_full(servers, cleanup_rfsock);
+
+	for (ch = 0; ch <= RFCOMM_CHANNEL_MAX; ch++)
+		if (servers[ch].rfsock)
+			cleanup_rfsock(servers[ch].rfsock);
+
+	memset(servers, 0, sizeof(servers));
 
 	ipc_unregister(HAL_SERVICE_ID_SOCK);
 }

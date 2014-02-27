@@ -37,14 +37,14 @@
 #include <bluetooth/hci.h>
 #include <bluetooth/sdp.h>
 
-#include "glib-helper.h"
+#include "uuid-helper.h"
 #include "eir.h"
 
 #define EIR_OOB_MIN (2 + 6)
 
 void eir_data_free(struct eir_data *eir)
 {
-	g_slist_free_full(eir->services, g_free);
+	g_slist_free_full(eir->services, free);
 	eir->services = NULL;
 	g_free(eir->name);
 	eir->name = NULL;
@@ -67,6 +67,8 @@ static void eir_parse_uuid16(struct eir_data *eir, const void *data,
 		service.value.uuid16 = bt_get_le16(uuid16);
 
 		uuid_str = bt_uuid2string(&service);
+		if (!uuid_str)
+			continue;
 		eir->services = g_slist_append(eir->services, uuid_str);
 	}
 }
@@ -84,6 +86,8 @@ static void eir_parse_uuid32(struct eir_data *eir, const void *data,
 		service.value.uuid32 = bt_get_le32(uuid32);
 
 		uuid_str = bt_uuid2string(&service);
+		if (!uuid_str)
+			continue;
 		eir->services = g_slist_append(eir->services, uuid_str);
 	}
 }
@@ -102,6 +106,8 @@ static void eir_parse_uuid128(struct eir_data *eir, const uint8_t *data,
 		for (k = 0; k < 16; k++)
 			service.value.uuid128.data[k] = uuid_ptr[16 - k - 1];
 		uuid_str = bt_uuid2string(&service);
+		if (!uuid_str)
+			continue;
 		eir->services = g_slist_append(eir->services, uuid_str);
 		uuid_ptr += 16;
 	}

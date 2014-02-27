@@ -39,21 +39,20 @@
 
 #include <gdbus/gdbus.h>
 
-#include "log.h"
+#include "src/log.h"
 
+#include "btio/btio.h"
 #include "lib/uuid.h"
-#include "../src/adapter.h"
-#include "../src/device.h"
-#include "../src/profile.h"
-#include "../src/service.h"
-#include "../src/storage.h"
-#include "../src/dbus-common.h"
+#include "src/adapter.h"
+#include "src/device.h"
+#include "src/profile.h"
+#include "src/service.h"
+#include "src/storage.h"
+#include "src/dbus-common.h"
+#include "src/error.h"
+#include "src/sdp-client.h"
 
 #include "device.h"
-#include "error.h"
-#include <btio/btio.h>
-
-#include "sdp-client.h"
 
 #define INPUT_INTERFACE "org.bluez.Input1"
 
@@ -823,7 +822,7 @@ static struct input_device *input_device_new(struct btd_service *service)
 	idev->handle = rec->handle;
 	idev->disable_sdp = is_device_sdp_disable(rec);
 
-	device_get_name(device, name, HCI_MAX_NAME_LENGTH);
+	device_get_name(device, name, sizeof(name));
 	if (strlen(name) > 0)
 		idev->name = g_strdup(name);
 

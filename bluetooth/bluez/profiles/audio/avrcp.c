@@ -53,12 +53,13 @@
 #include "src/profile.h"
 #include "src/service.h"
 
-#include "log.h"
-#include "error.h"
+#include "src/log.h"
+#include "src/error.h"
+#include "src/sdpd.h"
+#include "src/dbus-common.h"
+
 #include "avctp.h"
 #include "avrcp.h"
-#include "sdpd.h"
-#include "dbus-common.h"
 #include "control.h"
 #include "player.h"
 #include "transport.h"
@@ -281,72 +282,72 @@ static sdp_record_t *avrcp_ct_record(void)
 		return NULL;
 
 	sdp_uuid16_create(&root_uuid, PUBLIC_BROWSE_GROUP);
-	root = sdp_list_append(0, &root_uuid);
+	root = sdp_list_append(NULL, &root_uuid);
 	sdp_set_browse_groups(record, root);
 
 	/* Service Class ID List */
 	sdp_uuid16_create(&avrct, AV_REMOTE_SVCLASS_ID);
-	svclass_id = sdp_list_append(0, &avrct);
+	svclass_id = sdp_list_append(NULL, &avrct);
 	sdp_uuid16_create(&avrctr, AV_REMOTE_CONTROLLER_SVCLASS_ID);
 	svclass_id = sdp_list_append(svclass_id, &avrctr);
 	sdp_set_service_classes(record, svclass_id);
 
 	/* Protocol Descriptor List */
 	sdp_uuid16_create(&l2cap, L2CAP_UUID);
-	proto[0] = sdp_list_append(0, &l2cap);
+	proto[0] = sdp_list_append(NULL, &l2cap);
 	psm[0] = sdp_data_alloc(SDP_UINT16, &lp);
 	proto[0] = sdp_list_append(proto[0], psm[0]);
-	apseq = sdp_list_append(0, proto[0]);
+	apseq = sdp_list_append(NULL, proto[0]);
 
 	sdp_uuid16_create(&avctp, AVCTP_UUID);
-	proto[1] = sdp_list_append(0, &avctp);
+	proto[1] = sdp_list_append(NULL, &avctp);
 	version = sdp_data_alloc(SDP_UINT16, &avctp_ver);
 	proto[1] = sdp_list_append(proto[1], version);
 	apseq = sdp_list_append(apseq, proto[1]);
 
-	aproto = sdp_list_append(0, apseq);
+	aproto = sdp_list_append(NULL, apseq);
 	sdp_set_access_protos(record, aproto);
 
 	/* Additional Protocol Descriptor List */
 	sdp_uuid16_create(&l2cap, L2CAP_UUID);
-	proto1[0] = sdp_list_append(0, &l2cap);
+	proto1[0] = sdp_list_append(NULL, &l2cap);
 	psm[1] = sdp_data_alloc(SDP_UINT16, &ap);
 	proto1[0] = sdp_list_append(proto1[0], psm[1]);
-	apseq1 = sdp_list_append(0, proto1[0]);
+	apseq1 = sdp_list_append(NULL, proto1[0]);
 
 	sdp_uuid16_create(&avctp, AVCTP_UUID);
-	proto1[1] = sdp_list_append(0, &avctp);
+	proto1[1] = sdp_list_append(NULL, &avctp);
 	proto1[1] = sdp_list_append(proto1[1], version);
 	apseq1 = sdp_list_append(apseq1, proto1[1]);
 
-	aproto1 = sdp_list_append(0, apseq1);
+	aproto1 = sdp_list_append(NULL, apseq1);
 	sdp_set_add_access_protos(record, aproto1);
 
 	/* Bluetooth Profile Descriptor List */
 	sdp_uuid16_create(&profile[0].uuid, AV_REMOTE_PROFILE_ID);
 	profile[0].version = avrcp_ver;
-	pfseq = sdp_list_append(0, &profile[0]);
+	pfseq = sdp_list_append(NULL, &profile[0]);
 	sdp_set_profile_descs(record, pfseq);
 
 	features = sdp_data_alloc(SDP_UINT16, &feat);
 	sdp_attr_add(record, SDP_ATTR_SUPPORTED_FEATURES, features);
 
-	sdp_set_info_attr(record, "AVRCP CT", 0, 0);
+	sdp_set_info_attr(record, "AVRCP CT", NULL, NULL);
 
 	free(psm[0]);
 	free(psm[1]);
 	free(version);
-	sdp_list_free(proto[0], 0);
-	sdp_list_free(proto[1], 0);
-	sdp_list_free(apseq, 0);
-	sdp_list_free(proto1[0], 0);
-	sdp_list_free(proto1[1], 0);
-	sdp_list_free(aproto1, 0);
-	sdp_list_free(apseq1, 0);
-	sdp_list_free(pfseq, 0);
-	sdp_list_free(aproto, 0);
-	sdp_list_free(root, 0);
-	sdp_list_free(svclass_id, 0);
+	sdp_list_free(proto[0], NULL);
+	sdp_list_free(proto[1], NULL);
+	sdp_list_free(apseq, NULL);
+	sdp_list_free(proto1[0], NULL);
+	sdp_list_free(proto1[1], NULL);
+	sdp_list_free(aproto1, NULL);
+	sdp_list_free(apseq1, NULL);
+	sdp_list_free(pfseq, NULL);
+	sdp_list_free(aproto, NULL);
+	sdp_list_free(root, NULL);
+	sdp_list_free(svclass_id, NULL);
 
 	return record;
 }
@@ -375,67 +376,67 @@ static sdp_record_t *avrcp_tg_record(void)
 		return NULL;
 
 	sdp_uuid16_create(&root_uuid, PUBLIC_BROWSE_GROUP);
-	root = sdp_list_append(0, &root_uuid);
+	root = sdp_list_append(NULL, &root_uuid);
 	sdp_set_browse_groups(record, root);
 
 	/* Service Class ID List */
 	sdp_uuid16_create(&avrtg, AV_REMOTE_TARGET_SVCLASS_ID);
-	svclass_id = sdp_list_append(0, &avrtg);
+	svclass_id = sdp_list_append(NULL, &avrtg);
 	sdp_set_service_classes(record, svclass_id);
 
 	/* Protocol Descriptor List */
 	sdp_uuid16_create(&l2cap, L2CAP_UUID);
-	proto_control[0] = sdp_list_append(0, &l2cap);
+	proto_control[0] = sdp_list_append(NULL, &l2cap);
 	psm_control = sdp_data_alloc(SDP_UINT16, &lp);
 	proto_control[0] = sdp_list_append(proto_control[0], psm_control);
-	apseq = sdp_list_append(0, proto_control[0]);
+	apseq = sdp_list_append(NULL, proto_control[0]);
 
 	sdp_uuid16_create(&avctp, AVCTP_UUID);
-	proto_control[1] = sdp_list_append(0, &avctp);
+	proto_control[1] = sdp_list_append(NULL, &avctp);
 	version = sdp_data_alloc(SDP_UINT16, &avctp_ver);
 	proto_control[1] = sdp_list_append(proto_control[1], version);
 	apseq = sdp_list_append(apseq, proto_control[1]);
 
-	aproto_control = sdp_list_append(0, apseq);
+	aproto_control = sdp_list_append(NULL, apseq);
 	sdp_set_access_protos(record, aproto_control);
-	proto_browsing[0] = sdp_list_append(0, &l2cap);
+	proto_browsing[0] = sdp_list_append(NULL, &l2cap);
 	psm_browsing = sdp_data_alloc(SDP_UINT16, &lp_browsing);
 	proto_browsing[0] = sdp_list_append(proto_browsing[0], psm_browsing);
-	apseq_browsing = sdp_list_append(0, proto_browsing[0]);
+	apseq_browsing = sdp_list_append(NULL, proto_browsing[0]);
 
-	proto_browsing[1] = sdp_list_append(0, &avctp);
+	proto_browsing[1] = sdp_list_append(NULL, &avctp);
 	proto_browsing[1] = sdp_list_append(proto_browsing[1], version);
 	apseq_browsing = sdp_list_append(apseq_browsing, proto_browsing[1]);
 
-	aproto_browsing = sdp_list_append(0, apseq_browsing);
+	aproto_browsing = sdp_list_append(NULL, apseq_browsing);
 	sdp_set_add_access_protos(record, aproto_browsing);
 
 	/* Bluetooth Profile Descriptor List */
 	sdp_uuid16_create(&profile[0].uuid, AV_REMOTE_PROFILE_ID);
 	profile[0].version = avrcp_ver;
-	pfseq = sdp_list_append(0, &profile[0]);
+	pfseq = sdp_list_append(NULL, &profile[0]);
 	sdp_set_profile_descs(record, pfseq);
 
 	features = sdp_data_alloc(SDP_UINT16, &feat);
 	sdp_attr_add(record, SDP_ATTR_SUPPORTED_FEATURES, features);
 
-	sdp_set_info_attr(record, "AVRCP TG", 0, 0);
+	sdp_set_info_attr(record, "AVRCP TG", NULL, NULL);
 
 	free(psm_browsing);
-	sdp_list_free(proto_browsing[0], 0);
-	sdp_list_free(proto_browsing[1], 0);
-	sdp_list_free(apseq_browsing, 0);
-	sdp_list_free(aproto_browsing, 0);
+	sdp_list_free(proto_browsing[0], NULL);
+	sdp_list_free(proto_browsing[1], NULL);
+	sdp_list_free(apseq_browsing, NULL);
+	sdp_list_free(aproto_browsing, NULL);
 
 	free(psm_control);
 	free(version);
-	sdp_list_free(proto_control[0], 0);
-	sdp_list_free(proto_control[1], 0);
-	sdp_list_free(apseq, 0);
-	sdp_list_free(aproto_control, 0);
-	sdp_list_free(pfseq, 0);
-	sdp_list_free(root, 0);
-	sdp_list_free(svclass_id, 0);
+	sdp_list_free(proto_control[0], NULL);
+	sdp_list_free(proto_control[1], NULL);
+	sdp_list_free(apseq, NULL);
+	sdp_list_free(aproto_control, NULL);
+	sdp_list_free(pfseq, NULL);
+	sdp_list_free(root, NULL);
+	sdp_list_free(svclass_id, NULL);
 
 	return record;
 }
@@ -920,6 +921,7 @@ static uint8_t avrcp_handle_get_capabilities(struct avrcp *session,
 
 		return AVC_CTYPE_STABLE;
 	case CAP_EVENTS_SUPPORTED:
+		pdu->params[1] = 0;
 		for (i = 1; i <= AVRCP_EVENT_LAST; i++) {
 			if (session->supported_events & (1 << i)) {
 				pdu->params[1]++;
@@ -938,11 +940,19 @@ err:
 	return AVC_CTYPE_REJECTED;
 }
 
+static struct avrcp_player *target_get_player(struct avrcp *session)
+{
+	if (!session->target)
+		return NULL;
+
+	return session->target->player;
+}
+
 static uint8_t avrcp_handle_list_player_attributes(struct avrcp *session,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	uint16_t len = ntohs(pdu->params_len);
 	unsigned int i;
 
@@ -974,7 +984,7 @@ static uint8_t avrcp_handle_list_player_values(struct avrcp *session,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	uint16_t len = ntohs(pdu->params_len);
 	unsigned int i;
 
@@ -1043,7 +1053,7 @@ static uint8_t avrcp_handle_get_element_attributes(struct avrcp *session,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	uint16_t len = ntohs(pdu->params_len);
 	uint64_t identifier = bt_get_le64(&pdu->params[0]);
 	uint16_t pos;
@@ -1115,7 +1125,7 @@ static uint8_t avrcp_handle_get_current_player_value(struct avrcp *session,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	uint16_t len = ntohs(pdu->params_len);
 	uint8_t *settings;
 	unsigned int i;
@@ -1174,7 +1184,7 @@ static uint8_t avrcp_handle_set_player_value(struct avrcp *session,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	uint16_t len = ntohs(pdu->params_len);
 	unsigned int i;
 	uint8_t *param;
@@ -1293,7 +1303,7 @@ static uint8_t avrcp_handle_get_play_status(struct avrcp *session,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	uint16_t len = ntohs(pdu->params_len);
 	uint32_t position;
 	uint32_t duration;
@@ -1337,7 +1347,7 @@ static GList *player_list_settings(struct avrcp_player *player)
 
 static bool avrcp_handle_play(struct avrcp *session)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 
 	if (player == NULL)
 		return false;
@@ -1347,7 +1357,7 @@ static bool avrcp_handle_play(struct avrcp *session)
 
 static bool avrcp_handle_stop(struct avrcp *session)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 
 	if (player == NULL)
 		return false;
@@ -1357,7 +1367,7 @@ static bool avrcp_handle_stop(struct avrcp *session)
 
 static bool avrcp_handle_pause(struct avrcp *session)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 
 	if (player == NULL)
 		return false;
@@ -1367,7 +1377,7 @@ static bool avrcp_handle_pause(struct avrcp *session)
 
 static bool avrcp_handle_next(struct avrcp *session)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 
 	if (player == NULL)
 		return false;
@@ -1377,7 +1387,7 @@ static bool avrcp_handle_next(struct avrcp *session)
 
 static bool avrcp_handle_previous(struct avrcp *session)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 
 	if (player == NULL)
 		return false;
@@ -1420,7 +1430,7 @@ static uint8_t avrcp_handle_register_notification(struct avrcp *session,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	struct btd_device *dev = session->dev;
 	uint16_t len = ntohs(pdu->params_len);
 	uint64_t uid;
@@ -1446,7 +1456,7 @@ static uint8_t avrcp_handle_register_notification(struct avrcp *session,
 		break;
 	case AVRCP_EVENT_TRACK_CHANGED:
 		len = 9;
-		uid = player_get_uid(session->target->player);
+		uid = player_get_uid(player);
 		memcpy(&pdu->params[1], &uid, sizeof(uint64_t));
 
 		break;
@@ -1508,7 +1518,7 @@ static uint8_t avrcp_handle_request_continuing(struct avrcp *session,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	uint16_t len = ntohs(pdu->params_len);
 	struct pending_pdu *pending;
 
@@ -1648,7 +1658,7 @@ static size_t handle_vendordep_pdu(struct avctp *conn, uint8_t transaction,
 	}
 
 	DBG("AVRCP PDU 0x%02X, company 0x%06X len 0x%04X",
-			pdu->pdu_id, company_id, pdu->params_len);
+			pdu->pdu_id, company_id, ntohs(pdu->params_len));
 
 	pdu->packet_type = 0;
 	pdu->rsvd = 0;
@@ -1663,7 +1673,7 @@ static size_t handle_vendordep_pdu(struct avctp *conn, uint8_t transaction,
 			break;
 	}
 
-	if (!handler || handler->code != *code) {
+	if (handler->pdu_id != pdu->pdu_id || handler->code != *code) {
 		pdu->params[0] = AVRCP_STATUS_INVALID_COMMAND;
 		goto err_metadata;
 	}
@@ -1720,16 +1730,16 @@ static size_t handle_browsing_pdu(struct avctp *conn,
 	struct avrcp_browsing_header *pdu = (void *) operands;
 
 	DBG("AVRCP Browsing PDU 0x%02X, len 0x%04X", pdu->pdu_id,
-							pdu->param_len);
+							ntohs(pdu->param_len));
 
 	for (handler = browsing_handlers; handler->pdu_id; handler++) {
 		if (handler->pdu_id == pdu->pdu_id)
-			break;
+			goto done;
 	}
 
-	if (handler == NULL || handler->func == NULL)
-		return avrcp_browsing_general_reject(operands);
+	return avrcp_browsing_general_reject(operands);
 
+done:
 	session->transaction = transaction;
 	handler->func(session, pdu, transaction);
 	return AVRCP_BROWSING_HEADER_LENGTH + ntohs(pdu->param_len);
@@ -1745,7 +1755,7 @@ size_t avrcp_handle_vendor_reject(uint8_t *code, uint8_t *operands)
 	pdu->params[0] = AVRCP_STATUS_INTERNAL_ERROR;
 
 	DBG("rejecting AVRCP PDU 0x%02X, company 0x%06X len 0x%04X",
-				pdu->pdu_id, company_id, pdu->params_len);
+			pdu->pdu_id, company_id, ntohs(pdu->params_len));
 
 	return AVRCP_HEADER_LENGTH + 1;
 }
@@ -1895,9 +1905,9 @@ static gboolean avrcp_player_value_rsp(struct avctp *conn,
 static void avrcp_get_current_player_value(struct avrcp *session,
 						uint8_t *attrs, uint8_t count)
 {
-	uint8_t buf[AVRCP_HEADER_LENGTH + 5];
+	uint8_t buf[AVRCP_HEADER_LENGTH + AVRCP_ATTRIBUTE_LAST + 1];
 	struct avrcp_header *pdu = (void *) buf;
-	int i;
+	uint16_t length = AVRCP_HEADER_LENGTH + count + 1;
 
 	memset(buf, 0, sizeof(buf));
 
@@ -1907,11 +1917,10 @@ static void avrcp_get_current_player_value(struct avrcp *session,
 	pdu->params_len = htons(count + 1);
 	pdu->params[0] = count;
 
-	for (i = 0; count > 0; count--, i++)
-		pdu->params[i + 1] = attrs[i];
+	memcpy(pdu->params + 1, attrs, count);
 
 	avctp_send_vendordep_req(session->conn, AVC_CTYPE_STATUS,
-					AVC_SUBUNIT_PANEL, buf, sizeof(buf),
+					AVC_SUBUNIT_PANEL, buf, length,
 					avrcp_player_value_rsp, session);
 }
 
@@ -1920,22 +1929,32 @@ static gboolean avrcp_list_player_attributes_rsp(struct avctp *conn,
 					uint8_t *operands, size_t operand_count,
 					void *user_data)
 {
+	uint8_t attrs[AVRCP_ATTRIBUTE_LAST];
 	struct avrcp *session = user_data;
 	struct avrcp_header *pdu = (void *) operands;
-	uint8_t count;
+	uint8_t len, count = 0;
+	int i;
 
 	if (code == AVC_CTYPE_REJECTED)
 		return FALSE;
 
-	count = pdu->params[0];
+	len = pdu->params[0];
 
 	if (ntohs(pdu->params_len) < count) {
 		error("Invalid parameters");
 		return FALSE;
 	}
 
-	avrcp_get_current_player_value(session, &pdu->params[1],
-							pdu->params[0]);
+	for (i = 0; len > 0; len--, i++) {
+		/* Don't query invalid attributes */
+		if (pdu->params[i + 1] == AVRCP_ATTRIBUTE_ILEGAL ||
+				pdu->params[i + 1] > AVRCP_ATTRIBUTE_LAST)
+			continue;
+
+		attrs[count++] = pdu->params[i + 1];
+	}
+
+	avrcp_get_current_player_value(session, attrs, count);
 
 	return FALSE;
 }
@@ -2131,16 +2150,19 @@ static struct media_item *parse_media_folder(struct avrcp *session,
 {
 	struct avrcp_player *player = session->controller->player;
 	struct media_player *mp = player->user_data;
+	struct media_item *item;
 	uint16_t namelen;
 	char name[255];
 	uint64_t uid;
 	uint8_t type;
+	uint8_t playable;
 
 	if (len < 12)
 		return NULL;
 
 	uid = bt_get_be64(&operands[0]);
-	type = operands[9];
+	type = operands[8];
+	playable = operands[9];
 
 	namelen = MIN(bt_get_be16(&operands[12]), sizeof(name) - 1);
 	if (namelen > 0) {
@@ -2148,7 +2170,13 @@ static struct media_item *parse_media_folder(struct avrcp *session,
 		name[namelen] = '\0';
 	}
 
-	return media_player_create_folder(mp, name, type, uid);
+	item = media_player_create_folder(mp, name, type, uid);
+	if (!item)
+		return NULL;
+
+	media_item_set_playable(item, playable & 0x01);
+
+	return item;
 }
 
 static void avrcp_list_items(struct avrcp *session, uint32_t start,
@@ -3007,10 +3035,10 @@ static void avrcp_get_media_player_list(struct avrcp *session)
 static void avrcp_volume_changed(struct avrcp *session,
 						struct avrcp_header *pdu)
 {
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	uint8_t volume;
 
-	if (player == NULL)
+	if (!player)
 		return;
 
 	volume = pdu->params[1] & 0x7F;
@@ -3495,6 +3523,8 @@ static void session_destroy(struct avrcp *session)
 
 	server->sessions = g_slist_remove(server->sessions, session);
 
+	session_abort_pending_pdu(session);
+
 	if (session->browsing_timer > 0)
 		g_source_remove(session->browsing_timer);
 
@@ -3682,7 +3712,7 @@ static gboolean avrcp_handle_set_volume(struct avctp *conn,
 					void *user_data)
 {
 	struct avrcp *session = user_data;
-	struct avrcp_player *player = session->target->player;
+	struct avrcp_player *player = target_get_player(session);
 	struct avrcp_header *pdu = (void *) operands;
 	uint8_t volume;
 
@@ -3702,7 +3732,7 @@ int avrcp_set_volume(struct btd_device *dev, uint8_t volume)
 {
 	struct avrcp_server *server;
 	struct avrcp *session;
-	uint8_t buf[AVRCP_HEADER_LENGTH + 2];
+	uint8_t buf[AVRCP_HEADER_LENGTH + 1];
 	struct avrcp_header *pdu = (void *) buf;
 
 	server = find_server(servers, device_get_adapter(dev));

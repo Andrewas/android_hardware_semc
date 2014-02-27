@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2012  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2012-2014  Intel Corporation. All rights reserved.
  *
  *
  *  This library is free software; you can redistribute it and/or
@@ -31,12 +31,11 @@
 #include <sys/socket.h>
 
 #include "monitor/bt.h"
+#include "monitor/mainloop.h"
 #include "src/shared/io.h"
 #include "src/shared/util.h"
 #include "src/shared/queue.h"
-#include "monitor/mainloop.h"
-
-#include "hci.h"
+#include "src/shared/hci.h"
 
 #define BTPROTO_HCI	1
 struct sockaddr_hci {
