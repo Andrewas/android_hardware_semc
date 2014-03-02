@@ -71,7 +71,6 @@ index 0000000..1f730a0
 +-keep class org.chameleonos.screenrecorder.*
 +
 +# Keep click responders
-+
 diff --git a/packages/apps/ScreenRecorder/res/drawable-hdpi/ic_launcher.png b/packages/apps/ScreenRecorder/res/drawable-hdpi/ic_launcher.png
 new file mode 100644
 index 0000000000000000000000000000000000000000..243944f0c123290a1c2f7dbe236c655d56afedb7

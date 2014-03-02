@@ -1,7 +1,3 @@
-#       modified:   include/system/audio.h
-#       modified:   include/system/graphics.h
-#       modified:   include/utils/Flattenable.h
-#       modified:   libutils/Android.mk
 diff --git a/system/core/include/system/audio.h b/system/core/include/system/audio.h
 index 4563e67..f6610ca 100644
 --- a/system/core/include/system/audio.h

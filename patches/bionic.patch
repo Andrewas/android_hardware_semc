@@ -1,4 +1,3 @@
-#       modified:   linker/linker.cpp
 diff --git a/bionic/linker/linker.cpp b/bionic/linker/linker.cpp
 index 623be29..9a22d96 100644
 --- a/bionic/linker/linker.cpp

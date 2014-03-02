@@ -1,6 +1,3 @@
-#       modified:   include/hardware/audio_policy.h
-#       modified:   include/hardware/fb.h
-#       modified:   include/hardware/hwcomposer.h
 diff --git a/hardware/libhardware/include/hardware/audio_policy.h b/hardware/libhardware/include/hardware/audio_policy.h
 index bfaef3b..d5c6b08 100644
 --- a/hardware/libhardware/include/hardware/audio_policy.h

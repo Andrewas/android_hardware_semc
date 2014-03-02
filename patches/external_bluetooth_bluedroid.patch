@@ -1,4 +1,3 @@
-#       modified:   Android.mk
 diff --git a/external/bluetooth/bluedroid/Android.mk b/external/bluetooth/bluedroid/Android.mk
 index bfca5ae..0912d02 100644
 --- a/external/bluetooth/bluedroid/Android.mk
