@@ -840,10 +840,10 @@ index 24ca033..170f392 100644
  
      EGLDisplay      mDisplay;
 diff --git a/frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp b/frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp
-index 0b23d49..ebedf11 100644
+index d9323cc..5bac448 100644
 --- a/frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp
 +++ b/frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp
-@@ -2814,7 +2814,7 @@ status_t SurfaceFlinger::onTransact(
+@@ -2858,7 +2858,7 @@ status_t SurfaceFlinger::onTransact(
              const int pid = ipc->getCallingPid();
              const int uid = ipc->getCallingUid();
              if ((uid != AID_GRAPHICS) &&
@@ -852,7 +852,7 @@ index 0b23d49..ebedf11 100644
                   (uid != AID_SYSTEM) &&
  #endif
                      !PermissionCache::checkPermission(sAccessSurfaceFlinger, pid, uid)) {
-@@ -2957,6 +2957,9 @@ class GraphicProducerWrapper : public BBinder, public MessageHandler {
+@@ -3001,6 +3001,9 @@ class GraphicProducerWrapper : public BBinder, public MessageHandler {
      uint32_t code;
      Parcel const* data;
      Parcel* reply;
@@ -862,7 +862,7 @@ index 0b23d49..ebedf11 100644
  
      enum {
          MSG_API_CALL,
-@@ -2969,6 +2972,9 @@ class GraphicProducerWrapper : public BBinder, public MessageHandler {
+@@ -3013,6 +3016,9 @@ class GraphicProducerWrapper : public BBinder, public MessageHandler {
       */
      virtual status_t transact(uint32_t code,
              const Parcel& data, Parcel* reply, uint32_t flags) {
@@ -872,7 +872,7 @@ index 0b23d49..ebedf11 100644
          this->code = code;
          this->data = &data;
          this->reply = reply;
-@@ -2981,6 +2987,9 @@ class GraphicProducerWrapper : public BBinder, public MessageHandler {
+@@ -3025,6 +3031,9 @@ class GraphicProducerWrapper : public BBinder, public MessageHandler {
              looper->sendMessage(this, Message(MSG_API_CALL));
              barrier.wait();
          }
